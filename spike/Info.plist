@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>com.alikimovich.interview-lens.probe</string>
+	<key>CFBundleName</key>
+	<string>Interview Lens Probe</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>26.0</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Interview Lens captures system audio so it can transcribe the other participants in your meeting.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Interview Lens captures your microphone so it can tell your speech apart from the interviewer's.</string>
+</dict>
+</plist>
