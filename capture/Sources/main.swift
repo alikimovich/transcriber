@@ -126,7 +126,15 @@ func runCapture(_ o: Options) async -> Never {
     let interviewerMeter = LevelMeter()
     let candidateMeter = LevelMeter()
 
-    let transcriber = try? await DualTranscriber(locale: o.locale, writer: writer)
+    // Decide the channel set before building the transcriber: each channel
+    // pipeline is expensive to construct, so don't build one we won't feed.
+    let micAccess = o.useMic ? MicCapture.currentAccess() : .denied
+    var wantedChannels: [Channel] = [.interviewer]
+    if micAccess == .granted { wantedChannels.append(.candidate) }
+
+    let startedAt = Date()
+    let transcriber = try? await DualTranscriber(
+        locale: o.locale, channels: wantedChannels, writer: writer)
     if transcriber == nil {
         writer.emit(
             .status(
@@ -135,6 +143,7 @@ func runCapture(_ o: Options) async -> Never {
                     "on-device speech model unavailable for \(o.locale); capture will run without transcription"
             ))
     }
+    note(String(format: "transcriber ready in %.1fs", Date().timeIntervalSince(startedAt)))
 
     // System audio → interviewer channel.
     let tap = SystemAudioTap { buffer in
@@ -153,34 +162,33 @@ func runCapture(_ o: Options) async -> Never {
     // channel is the one that carries the questions.
     var mic: MicCapture?
     var micLive = false
-    if o.useMic {
-        switch MicCapture.currentAccess() {
-        case .granted:
-            let m = MicCapture { buffer in
-                candidateMeter.accumulate(buffer)
-                transcriber?.feed(buffer, into: .candidate)
-            }
-            do {
-                try m.start()
-                mic = m
-                micLive = true
-            } catch {
-                writer.emit(.status(code: .captureError, message: String(describing: error)))
-            }
-        case .denied:
-            writer.emit(
-                .status(
-                    code: .micPermissionDenied,
-                    message: "microphone access denied; continuing with the interviewer channel only"
-                ))
-        case .notDetermined:
-            writer.emit(
-                .status(
-                    code: .micPermissionDenied,
-                    message:
-                        "microphone access not yet granted; run `ilcapture request-mic` once, then restart. Continuing with the interviewer channel only"
-                ))
+    switch micAccess {
+    case .granted:
+        let m = MicCapture { buffer in
+            candidateMeter.accumulate(buffer)
+            transcriber?.feed(buffer, into: .candidate)
         }
+        do {
+            try m.start()
+            mic = m
+            micLive = true
+        } catch {
+            writer.emit(.status(code: .captureError, message: String(describing: error)))
+        }
+    case .denied where o.useMic:
+        writer.emit(
+            .status(
+                code: .micPermissionDenied,
+                message: "microphone access denied; continuing with the interviewer channel only"))
+    case .notDetermined:
+        writer.emit(
+            .status(
+                code: .micPermissionDenied,
+                message:
+                    "microphone access not yet granted; run `ilcapture request-mic` once, then restart. Continuing with the interviewer channel only"
+            ))
+    default:
+        break
     }
 
     writer.emit(

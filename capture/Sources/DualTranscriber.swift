@@ -135,7 +135,7 @@ enum TranscriberError: Error, CustomStringConvertible {
 final class DualTranscriber: @unchecked Sendable {
     private var channels: [Channel: ChannelTranscriber] = [:]
 
-    init(locale localeID: String, writer: EventWriter) async throws {
+    init(locale localeID: String, channels wanted: [Channel], writer: EventWriter) async throws {
         let locale = Locale(identifier: localeID)
 
         // Make sure the on-device model is present before starting, and report
@@ -156,9 +156,22 @@ final class DualTranscriber: @unchecked Sendable {
         // (typically 5), so release on the way out.
         _ = try? await AssetInventory.reserve(locale: locale)
 
-        for channel in [Channel.interviewer, Channel.candidate] {
-            channels[channel] = try await ChannelTranscriber(
-                channel: channel, locale: locale, writer: writer)
+        // Build the pipelines concurrently: each one loads models and probes
+        // formats, and doing that serially doubles an already slow startup.
+        // Only build channels that will actually receive audio.
+        try await withThrowingTaskGroup(of: (Channel, ChannelTranscriber).self) { group in
+            for channel in wanted {
+                group.addTask {
+                    (
+                        channel,
+                        try await ChannelTranscriber(
+                            channel: channel, locale: locale, writer: writer)
+                    )
+                }
+            }
+            for try await (channel, transcriber) in group {
+                channels[channel] = transcriber
+            }
         }
     }
 
