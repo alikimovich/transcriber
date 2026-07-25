@@ -136,6 +136,12 @@ export class CaptureSupervisor extends EventEmitter {
    * fix.
    */
   private replaceHelper(): void {
+    // Retire the outgoing helper's generation *now*, not when the replacement
+    // spawns. It keeps emitting between the SIGTERM and its actual exit — most
+    // damagingly a final `ready` — and everything in that window belongs to a
+    // session we have already abandoned.
+    this.generation += 1
+
     const outgoing = this.child
     if (!outgoing || outgoing.exitCode !== null) {
       this.spawnHelper()
