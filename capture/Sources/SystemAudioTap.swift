@@ -128,9 +128,41 @@ final class SystemAudioTap {
             throw TapError.createIOProcFailed(ioStatus)
         }
 
+        // Let the aggregate device settle before starting IO. Without this the
+        // tap intermittently delivers callbacks full of zeroes — roughly one
+        // run in three in testing — which is indistinguishable from a missing
+        // permission grant.
+        Thread.sleep(forTimeInterval: 0.3)
+
         // First run triggers the system-audio permission prompt here.
         let startStatus = AudioDeviceStart(aggregateID, ioProcID)
         guard startStatus == noErr else { throw TapError.startFailed(startStatus) }
+    }
+
+    /// Starts capture and reports whether real audio is flowing.
+    ///
+    /// Roughly one process launch in three brings the tap up silent: callbacks
+    /// arrive at the normal rate with the correct format, but every sample is
+    /// zero. Measured, not guessed — a silent run and a working run produced an
+    /// identical number of IO callbacks at an identical 48 kHz stereo format.
+    ///
+    /// Tearing the tap down and rebuilding it *within the same process* does
+    /// not help: the in-process retry failed on every occasion it fired. The
+    /// failure is correlated with the process instance, so the effective
+    /// mitigation is relaunching the helper, which the supervising CLI does.
+    /// Root cause is not yet identified — see SPIKE.md.
+    ///
+    /// Note this cannot distinguish "the tap is broken" from "the target app is
+    /// genuinely quiet"; both look like silence. The caller reports it as a
+    /// state rather than an error for that reason.
+    func startVerified(
+        processObjectIDs: [AudioObjectID],
+        meter: LevelMeter,
+        settle: Duration = .milliseconds(1200)
+    ) async throws -> Bool {
+        try start(processObjectIDs: processObjectIDs)
+        try? await Task.sleep(for: settle)
+        return meter.drain().peak > 0
     }
 
     func stop() {

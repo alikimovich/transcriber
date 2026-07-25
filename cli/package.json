@@ -1,0 +1,26 @@
+{
+  "name": "interview-lens",
+  "version": "0.1.0",
+  "description": "Transcript assembly and question interpretation for Interview Lens",
+  "type": "module",
+  "private": true,
+  "module": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src test",
+    "format": "biome format --write src test",
+    "check": "bun run typecheck && bun run lint && bun test"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.5",
+    "@types/bun": "latest",
+    "typescript": "^5.9.3"
+  }
+}

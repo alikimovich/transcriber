@@ -24,10 +24,15 @@ private final class ChannelTranscriber: @unchecked Sendable {
     init(channel: Channel, locale: Locale, writer: EventWriter) async throws {
         self.channel = channel
 
-        // Progressive gives volatile (partial) results for a live view;
-        // time-indexed gives per-result audio time ranges.
+        // Volatile results drive the live view; audioTimeRange gives per-word
+        // timings on finalized results. fastResults trades a little accuracy
+        // for lower latency, which is the right trade when the point is to
+        // react during a live conversation.
         transcriber = SpeechTranscriber(
-            locale: locale, preset: .timeIndexedProgressiveTranscription)
+            locale: locale,
+            transcriptionOptions: [],
+            reportingOptions: [.volatileResults, .fastResults],
+            attributeOptions: [.audioTimeRange])
 
         guard
             let format = await SpeechAnalyzer.bestAvailableAudioFormat(
@@ -84,6 +89,9 @@ private final class ChannelTranscriber: @unchecked Sendable {
         // switched to AirPods mid-session).
         if converter == nil || converterSourceFormat != sourceFormat {
             converter = AVAudioConverter(from: sourceFormat, to: analyzerFormat)
+            // Without this the converter primes with silence, which shifts every
+            // timestamp downstream.
+            converter?.primeMethod = .none
             converterSourceFormat = sourceFormat
         }
         guard let converter else { return nil }
@@ -111,8 +119,21 @@ private final class ChannelTranscriber: @unchecked Sendable {
     }
 
     func finish() async {
+        // Order matters: finalizeAndFinishThroughEndOfInput() waits for the
+        // input sequence to terminate, so finishing the continuation first is
+        // required or it blocks forever.
         continuation.finish()
-        try? await analyzer.finalizeAndFinishThroughEndOfInput()
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { [analyzer] in
+                try? await analyzer.finalizeAndFinishThroughEndOfInput()
+            }
+            group.addTask {
+                // Teardown is best-effort; a stuck finalize must not wedge exit.
+                try? await Task.sleep(for: .seconds(3))
+            }
+            await group.next()
+            group.cancelAll()
+        }
         resultsTask?.cancel()
     }
 }
@@ -140,7 +161,11 @@ final class DualTranscriber: @unchecked Sendable {
 
         // Make sure the on-device model is present before starting, and report
         // the download rather than appearing to hang on first run.
-        let probe = SpeechTranscriber(locale: locale, preset: .timeIndexedProgressiveTranscription)
+        let probe = SpeechTranscriber(
+            locale: locale,
+            transcriptionOptions: [],
+            reportingOptions: [.volatileResults, .fastResults],
+            attributeOptions: [.audioTimeRange])
         let assetStatus = await AssetInventory.status(forModules: [probe])
         if assetStatus != .installed {
             if let request = try await AssetInventory.assetInstallationRequest(supporting: [probe]) {

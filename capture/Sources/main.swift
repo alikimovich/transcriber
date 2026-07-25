@@ -150,11 +150,21 @@ func runCapture(_ o: Options) async -> Never {
         interviewerMeter.accumulate(buffer)
         transcriber?.feed(buffer, into: .interviewer)
     }
+    var systemAudioLive = false
     do {
-        try tap.start(processObjectIDs: targets)
+        systemAudioLive = try await tap.startVerified(
+            processObjectIDs: targets, meter: interviewerMeter)
     } catch {
         writer.emit(.status(code: .captureError, message: String(describing: error)))
         exit(3)
+    }
+    if !systemAudioLive {
+        writer.emit(
+            .status(
+                code: .systemAudioSilent,
+                message:
+                    "system audio is delivering silence. If the target app is playing sound, check System Settings > Privacy & Security > Screen & System Audio Recording"
+            ))
     }
 
     // Microphone → candidate channel. A missing microphone degrades the
@@ -209,7 +219,7 @@ func runCapture(_ o: Options) async -> Never {
     }
 
     let deadline = o.seconds.map { Date().addingTimeInterval($0) }
-    var reportedSilence = false
+    var reportedSilence = !systemAudioLive
 
     while !stopping.isSet {
         if let deadline, Date() >= deadline { break }
