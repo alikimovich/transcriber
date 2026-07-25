@@ -115,8 +115,20 @@ failing it; the interviewer channel is the one carrying the questions.
 
 ## Known issues
 
-- **The system tap intermittently comes up silent** (~1 run in 3 before
-  mitigation). The helper now settles the aggregate device before starting IO
-  and retries once, reporting `system_audio_silent` if it still fails. See
-  SPIKE.md.
-- Startup takes a few seconds while the speech models load.
+**Startup takes about nine seconds.** Almost all of it is
+`AudioHardwareCreateAggregateDevice` — measured at ~7.5s, against 0.3s to load
+both speech models. That's Core Audio's cost, not ours. Start the session
+before the call rather than during it.
+
+**The system tap comes up silent on roughly one launch in three.** Callbacks
+arrive at the normal rate with the correct format; every sample is just zero.
+Rebuilding the tap in-process never helps, so `interview-lens run` supervises
+the helper and relaunches it, showing `restarting capture (1/3)`. Because a
+retiring helper holds its tap until teardown finishes, the replacement only
+starts once the old process has actually exited — starting it sooner leaves two
+helpers contending for the device and the newcomer produces nothing. A recovery
+therefore costs another startup cycle. Root cause unidentified; see SPIKE.md.
+
+**Without headphones the channels bleed.** The interviewer's voice comes out of
+your speakers and back in through the microphone, so the same question lands on
+both channels. Wear headphones.

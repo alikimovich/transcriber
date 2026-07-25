@@ -4,3 +4,4 @@ spike/sample.txt
 *.aiff
 capture/ilcapture
 node_modules/
+cli/node_modules/

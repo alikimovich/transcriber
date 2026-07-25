@@ -19,8 +19,8 @@
  * discriminated union instead.
  */
 
-import { type BuildRequestArgs, buildRequestBody, type ResponsesRequest } from './prompt'
-import { type Interpretation, interpretationSchema } from './types'
+import { type BuildRequestArgs, buildRequestBody, type ResponsesRequest } from './prompt.ts'
+import { type Interpretation, interpretationSchema } from './types.ts'
 
 export const RESPONSES_URL = 'https://api.openai.com/v1/responses'
 

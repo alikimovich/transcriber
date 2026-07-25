@@ -151,6 +151,7 @@ func runCapture(_ o: Options) async -> Never {
         transcriber?.feed(buffer, into: .interviewer)
     }
     var systemAudioLive = false
+    let tapStartedAt = Date()
     do {
         systemAudioLive = try await tap.startVerified(
             processObjectIDs: targets, meter: interviewerMeter)
@@ -158,6 +159,8 @@ func runCapture(_ o: Options) async -> Never {
         writer.emit(.status(code: .captureError, message: String(describing: error)))
         exit(3)
     }
+    note(String(format: "tap verified in %.1fs (live: %@)",
+        Date().timeIntervalSince(tapStartedAt), systemAudioLive ? "yes" : "no"))
     if !systemAudioLive {
         writer.emit(
             .status(
@@ -245,7 +248,9 @@ func runCapture(_ o: Options) async -> Never {
         }
     }
 
+    let teardownAt = Date()
     await transcriber?.finish()
+    note(String(format: "transcriber finish took %.1fs", Date().timeIntervalSince(teardownAt)))
     mic?.stop()
     tap.stop()
     writer.emit(.stopped(reason: stopping.isSet ? "signal" : "duration"))

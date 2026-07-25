@@ -129,7 +129,9 @@ private final class ChannelTranscriber: @unchecked Sendable {
             }
             group.addTask {
                 // Teardown is best-effort; a stuck finalize must not wedge exit.
-                try? await Task.sleep(for: .seconds(3))
+                // Kept short because a restart pays this before the replacement
+                // helper may start, and tap setup already costs several seconds.
+                try? await Task.sleep(for: .milliseconds(1200))
             }
             await group.next()
             group.cancelAll()

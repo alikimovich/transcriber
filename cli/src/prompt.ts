@@ -13,7 +13,7 @@
  *    transcript window. Prompt caching only pays off on a shared prefix.
  */
 
-import type { SetupContext, Turn } from './types'
+import type { SetupContext, Turn } from './types.ts'
 
 export const INTERPRET_MODEL = 'gpt-5.6-luna'
 

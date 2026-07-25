@@ -34,7 +34,7 @@ import {
   statusChannel,
   type TranscriptEvent,
   type Turn
-} from './types'
+} from './types.ts'
 
 /** Tolerance for comparing audio-timeline positions, in seconds. */
 const EPSILON = 1e-6
@@ -240,11 +240,12 @@ export class TranscriptStore {
     }
 
     if (e.isFinal) {
-      // A promoted volatile whose span this result covers was a guess at the
-      // same speech; the authoritative version supersedes it.
-      slot.finals = slot.finals.filter(
-        (s) => !s.promoted || s.start < segment.start - EPSILON || s.end > segment.end + EPSILON
-      )
+      // A retired volatile that covered mostly this same audio was a guess at
+      // the same speech; the authoritative version supersedes it. `upsertFinal`
+      // already handles the case where the two agree on `start` exactly — this
+      // catches the case where the analyzer nudged the boundary, which would
+      // otherwise leave the guess and the real thing sitting side by side.
+      slot.finals = slot.finals.filter((s) => !s.promoted || !mostlyCoveredBy(s, segment))
       upsertFinal(slot.finals, segment)
       // Anything the live segment covered up to this point is now finalized.
       if (slot.live !== null && slot.live.start < segment.end - EPSILON) slot.live = null
@@ -319,6 +320,21 @@ export class TranscriptStore {
 
 function emptySlot(): ChannelSlot {
   return { finals: [], live: null, offset: null, level: null, status: null }
+}
+
+/**
+ * Whether `span` accounts for most of `segment`'s audio.
+ *
+ * Deliberately not a containment test and deliberately not bare overlap. Two
+ * results for the same utterance can disagree slightly about both boundaries, so
+ * containment misses them; but a finalized result for the *next* utterance can
+ * also clip the previous one by a few milliseconds, and bare overlap would throw
+ * away a whole abandoned question on the strength of that.
+ */
+function mostlyCoveredBy(segment: Segment, span: { start: number; end: number }): boolean {
+  const overlap = Math.min(segment.end, span.end) - Math.max(segment.start, span.start)
+  if (overlap <= 0) return false
+  return overlap >= (segment.end - segment.start) / 2
 }
 
 /**

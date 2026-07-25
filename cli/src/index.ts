@@ -13,8 +13,8 @@
  * ```
  */
 
-export * from './config'
-export * from './openai'
-export * from './prompt'
-export * from './transcript'
-export * from './types'
+export * from './config.ts'
+export * from './openai.ts'
+export * from './prompt.ts'
+export * from './transcript.ts'
+export * from './types.ts'

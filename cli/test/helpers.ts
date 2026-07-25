@@ -8,8 +8,15 @@
  * expected values readable.
  */
 
-import type { Channel, LevelEvent, ReadyEvent, StatusCode, StatusEvent } from '../src/types'
-import type { StoppedEvent, TranscriptEvent } from '../src/types'
+import type {
+  Channel,
+  LevelEvent,
+  ReadyEvent,
+  StatusCode,
+  StatusEvent,
+  StoppedEvent,
+  TranscriptEvent
+} from '../src/types.ts'
 
 /** An arbitrary but fixed epoch second, so no test depends on the wall clock. */
 export const T0 = 1_700_000_000

@@ -11,7 +11,7 @@
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { type SetupContext, setupContextSchema } from './types'
+import { type SetupContext, setupContextSchema } from './types.ts'
 
 const APP_NAME = 'interview-lens'
 const FILE_NAME = 'context.json'
