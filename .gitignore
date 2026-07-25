@@ -2,3 +2,5 @@ spike/ilprobe
 spike/*.log
 spike/sample.txt
 *.aiff
+capture/ilcapture
+node_modules/

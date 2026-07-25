@@ -1,0 +1,92 @@
+// Microphone capture — the candidate channel.
+//
+// Note on channel separation: without headphones the interviewer's voice leaks
+// from the speakers into this microphone, so the same question lands on both
+// channels. The CLI warns about this; the honest fix is headphones.
+
+import AVFoundation
+import Foundation
+
+final class MicCapture {
+    enum MicError: Error, CustomStringConvertible {
+        case permissionDenied
+        case engineFailed(String)
+
+        var description: String {
+            switch self {
+            case .permissionDenied:
+                return "microphone access was denied"
+            case .engineFailed(let m):
+                return "audio engine failed to start: \(m)"
+            }
+        }
+    }
+
+    private let engine = AVAudioEngine()
+    private let onBuffer: (AVAudioPCMBuffer) -> Void
+    private(set) var format: AVAudioFormat?
+
+    init(onBuffer: @escaping (AVAudioPCMBuffer) -> Void) {
+        self.onBuffer = onBuffer
+    }
+
+    deinit { stop() }
+
+    enum Access {
+        case granted
+        case denied
+        /// Never asked. The capture path deliberately does not prompt — a
+        /// headless helper that blocks on a modal dialog is indistinguishable
+        /// from a hang. `ilcapture request-mic` does the asking.
+        case notDetermined
+    }
+
+    /// Non-blocking. Never shows a dialog.
+    static func currentAccess() -> Access {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: return .granted
+        case .notDetermined: return .notDetermined
+        default: return .denied
+        }
+    }
+
+    /// Shows the system prompt and waits for an answer. Only ever called from
+    /// the explicit `request-mic` command, never during capture.
+    static func promptForAccess() async -> Access {
+        guard AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined else {
+            return currentAccess()
+        }
+        return await AVCaptureDevice.requestAccess(for: .audio) ? .granted : .denied
+    }
+
+    func start() throws {
+        guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
+            throw MicError.permissionDenied
+        }
+
+        let input = engine.inputNode
+        // Passing the node's own format avoids a format mismatch crash when the
+        // default input device changes (AirPods connecting mid-session, etc.).
+        let nodeFormat = input.outputFormat(forBus: 0)
+        format = nodeFormat
+
+        let handler = onBuffer
+        input.installTap(onBus: 0, bufferSize: 4096, format: nodeFormat) { buffer, _ in
+            handler(buffer)
+        }
+
+        engine.prepare()
+        do {
+            try engine.start()
+        } catch {
+            throw MicError.engineFailed(error.localizedDescription)
+        }
+    }
+
+    func stop() {
+        if engine.isRunning {
+            engine.inputNode.removeTap(onBus: 0)
+            engine.stop()
+        }
+    }
+}
