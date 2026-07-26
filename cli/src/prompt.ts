@@ -15,67 +15,8 @@
 
 import type { SetupContext, Turn } from './types.ts'
 
-export const INTERPRET_MODEL = 'gpt-5.6-luna'
-
-/** Bump the suffix whenever the cached prefix (instructions/format) changes. */
-export const PROMPT_CACHE_KEY = 'interview-lens:interpret-v1'
-
-export const MAX_OUTPUT_TOKENS = 400
-
 /** Guard against a pasted 50-page job description blowing up latency and cost. */
 const MAX_CONTEXT_CHARS = 6000
-
-/**
- * Strict structured output for the Responses API. Note the shape: `name`,
- * `strict` and `schema` are siblings under `text.format` — the nested
- * `json_schema` object is the Chat Completions shape and is rejected here.
- *
- * Under `strict: true` every property must appear in `required`, so optionality
- * is expressed as a `null` union, and `additionalProperties: false` is required.
- */
-export const INTERPRETATION_FORMAT = {
-  type: 'json_schema',
-  name: 'interpretation',
-  strict: true,
-  schema: {
-    type: 'object',
-    properties: {
-      intent: {
-        type: 'string',
-        description:
-          'What the interviewer is actually probing for with this question, in at most 18 words.'
-      },
-      emphasis: {
-        type: 'string',
-        description:
-          'Which dimension of experience a strong answer should foreground — not the answer itself. At most 18 words.'
-      },
-      clarification: {
-        type: ['string', 'null'],
-        description:
-          'A short question the candidate could ask back if the request is ambiguous, otherwise null.'
-      },
-      confidence: {
-        type: 'string',
-        enum: ['low', 'medium', 'high'],
-        description: 'How confident you are that you identified the question and its intent.'
-      }
-    },
-    required: ['intent', 'emphasis', 'clarification', 'confidence'],
-    additionalProperties: false
-  }
-} as const
-
-export type ResponsesRequest = {
-  model: string
-  instructions: string
-  input: { role: 'user'; content: { type: 'input_text'; text: string }[] }[]
-  reasoning: { effort: 'none' }
-  text: { verbosity: 'low'; format: typeof INTERPRETATION_FORMAT }
-  max_output_tokens: number
-  store: false
-  prompt_cache_key: string
-}
 
 export const INSTRUCTIONS = `You support a candidate during a live job interview. They can glance at your output for about two seconds while someone is talking to them, so every word has to earn its place.
 
@@ -121,29 +62,6 @@ export type BuildRequestArgs = {
   context: SetupContext
   turns: Turn[]
   model?: string
-}
-
-/** Assemble the full `POST /v1/responses` body. */
-export function buildRequestBody({
-  context,
-  turns,
-  model = INTERPRET_MODEL
-}: BuildRequestArgs): ResponsesRequest {
-  return {
-    model,
-    instructions: INSTRUCTIONS,
-    input: [
-      { role: 'user', content: [{ type: 'input_text', text: formatSetupContext(context) }] },
-      { role: 'user', content: [{ type: 'input_text', text: formatWindow(turns) }] }
-    ],
-    // Lowest latency: this task is recall and classification, not deliberation.
-    reasoning: { effort: 'none' },
-    text: { verbosity: 'low', format: INTERPRETATION_FORMAT },
-    max_output_tokens: MAX_OUTPUT_TOKENS,
-    // Interview transcripts are confidential; nothing is retained server-side.
-    store: false,
-    prompt_cache_key: PROMPT_CACHE_KEY
-  }
 }
 
 function orPlaceholder(value: string): string {

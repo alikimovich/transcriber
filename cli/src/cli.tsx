@@ -16,8 +16,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 
 import { clearContext, contextPath, loadContext, saveContext } from './config.ts'
 import { apiKeySource } from './credentials.ts'
+import { interpret } from './interpret.ts'
 import { serveStdio } from './mcp.ts'
-import { interpret } from './openai.ts'
+import { resolveProvider } from './providers/index.ts'
+import { loadSettings, type Settings } from './settings.ts'
 import { CaptureSupervisor, type CaptureTarget } from './supervisor.ts'
 import { TranscriptStore } from './transcript.ts'
 import { Tui, type ViewState } from './tui.tsx'
@@ -66,7 +68,15 @@ function describeTarget(target: CaptureTarget): string {
 // run
 // ---------------------------------------------------------------------------
 
-function App({ target, useMic }: { target: CaptureTarget; useMic: boolean }) {
+function App({
+  target,
+  useMic,
+  settings
+}: {
+  target: CaptureTarget
+  useMic: boolean
+  settings: Settings
+}) {
   const storeRef = useRef(new TranscriptStore())
   const supervisorRef = useRef<CaptureSupervisor | null>(null)
   const startedAt = useRef(Date.now())
@@ -180,7 +190,11 @@ function App({ target, useMic }: { target: CaptureTarget; useMic: boolean }) {
 
     const result = await interpret(
       { turns, context: await loadContext() },
-      { signal: controller.signal }
+      {
+        signal: controller.signal,
+        savedProvider: settings.provider,
+        model: settings.model ?? undefined
+      }
     )
     if (controller.signal.aborted) return
 
@@ -231,12 +245,14 @@ function App({ target, useMic }: { target: CaptureTarget; useMic: boolean }) {
 async function runSession(argv: string[]): Promise<void> {
   const target = parseTarget(argv)
   const useMic = !argv.includes('--no-mic')
-  if (apiKeySource() === 'none') {
+  const settings = await loadSettings()
+  const provider = resolveProvider(null, settings.provider)
+  if (apiKeySource(provider) === 'none') {
     process.stderr.write(
-      'warning: no OpenAI API key — transcription will work, interpretation will not.\n'
+      `warning: no ${provider.label} API key — transcription will work, interpretation will not.\n`
     )
   }
-  const { waitUntilExit } = render(React.createElement(App, { target, useMic }))
+  const { waitUntilExit } = render(React.createElement(App, { target, useMic, settings }))
   await waitUntilExit()
 }
 
@@ -340,10 +356,13 @@ async function runDoctor(): Promise<void> {
 
   out('')
   out('credentials')
-  const source = apiKeySource()
-  if (source === 'env') good('API key from OPENAI_API_KEY')
+  const settings = await loadSettings()
+  const provider = resolveProvider(null, settings.provider)
+  out(`  using ${provider.label} · ${settings.model ?? provider.defaultModel}`)
+  const source = apiKeySource(provider)
+  if (source === 'env') good(`API key from ${provider.envVar}`)
   else if (source === 'keychain') good('API key from the login Keychain')
-  else bad('no API key — run ./install.sh, or set OPENAI_API_KEY')
+  else bad(`no ${provider.label} API key — run ./install.sh, or set ${provider.envVar}`)
 
   out('')
   out('setup context')

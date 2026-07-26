@@ -8,7 +8,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
 import { loadContext } from './config.ts'
-import { interpret } from './openai.ts'
+import { interpret } from './interpret.ts'
+import { loadSettings } from './settings.ts'
 import type { TranscriptStore } from './transcript.ts'
 
 export interface McpDeps {
@@ -93,7 +94,11 @@ export function buildServer({ transcript }: McpDeps): McpServer {
     },
     async ({ seconds }) => {
       const turns = transcript.window(seconds ?? 300)
-      const result = await interpret({ turns, context: await loadContext() })
+      const settings = await loadSettings()
+      const result = await interpret(
+        { turns, context: await loadContext() },
+        { savedProvider: settings.provider, model: settings.model ?? undefined }
+      )
 
       if (result.kind !== 'ok') {
         // interpret() never throws; every failure mode is a `kind`. Report it

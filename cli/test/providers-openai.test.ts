@@ -3,12 +3,10 @@ import {
   type FetchLike,
   type InterpretOptions,
   type InterpretResult,
-  interpret,
-  parseGoDuration,
-  parseInterpretationResponse,
-  RESPONSES_URL,
-  suggestedDelayMs
-} from '../src/openai.ts'
+  interpret
+} from '../src/interpret.ts'
+import { openaiProvider, RESPONSES_URL } from '../src/providers/index.ts'
+import { parseGoDuration, suggestedDelayMs } from '../src/retry.ts'
 import type { Interpretation, SetupContext, Turn } from '../src/types.ts'
 import { T0 } from './helpers.ts'
 
@@ -98,6 +96,9 @@ const hangingFetch: FetchLike = (_url, init) =>
 
 function deterministic(overrides: InterpretOptions = {}): InterpretOptions {
   return {
+    // Pinned: these exercise the OpenAI envelope and endpoint specifically.
+    // The default provider is xAI.
+    provider: 'openai',
     apiKey: 'sk-test',
     random: () => 0.5,
     now: () => 1_000_000,
@@ -119,7 +120,7 @@ function expectError(result: InterpretResult) {
 
 describe('response parsing', () => {
   test('extracts the interpretation past a leading reasoning item', () => {
-    const result = expectOk(parseInterpretationResponse(completedResponse(interpretation)))
+    const result = expectOk(openaiProvider.parseResponse(completedResponse(interpretation)))
 
     expect(result.interpretation).toEqual(interpretation)
     expect(result.responseId).toBe('resp_abc123')
@@ -145,7 +146,7 @@ describe('response parsing', () => {
       ]
     })
 
-    const result = parseInterpretationResponse(response)
+    const result = openaiProvider.parseResponse(response)
 
     expect(result.kind).toBe('refusal')
     if (result.kind === 'refusal') expect(result.message).toBe('I cannot help with that.')
@@ -157,7 +158,7 @@ describe('response parsing', () => {
       incomplete_details: { reason: 'max_output_tokens' }
     })
 
-    const result = parseInterpretationResponse(response)
+    const result = openaiProvider.parseResponse(response)
 
     expect(result.kind).toBe('incomplete')
     if (result.kind === 'incomplete') {
@@ -167,7 +168,7 @@ describe('response parsing', () => {
   })
 
   test('reports a failed response using the error message', () => {
-    const result = parseInterpretationResponse(
+    const result = openaiProvider.parseResponse(
       completedResponse(interpretation, {
         status: 'failed',
         error: { code: 'server_error', message: 'the model went away' }
@@ -179,7 +180,7 @@ describe('response parsing', () => {
   })
 
   test('reports malformed JSON without throwing', () => {
-    const result = parseInterpretationResponse(completedResponse('{"intent": "half a resp'))
+    const result = openaiProvider.parseResponse(completedResponse('{"intent": "half a resp'))
 
     expect(result.kind).toBe('malformed')
     if (result.kind === 'malformed') {
@@ -189,7 +190,7 @@ describe('response parsing', () => {
   })
 
   test('rejects valid JSON that is not an interpretation', () => {
-    const result = parseInterpretationResponse(
+    const result = openaiProvider.parseResponse(
       completedResponse({ intent: 'x', emphasis: 'y', confidence: 'certain' })
     )
 
@@ -200,7 +201,7 @@ describe('response parsing', () => {
   test('rejects an interpretation missing clarification', () => {
     const { clarification: _omitted, ...withoutClarification } = interpretation
 
-    expect(parseInterpretationResponse(completedResponse(withoutClarification)).kind).toBe(
+    expect(openaiProvider.parseResponse(completedResponse(withoutClarification)).kind).toBe(
       'malformed'
     )
   })
@@ -219,20 +220,20 @@ describe('response parsing', () => {
       ]
     })
 
-    expect(expectOk(parseInterpretationResponse(response)).interpretation).toEqual(interpretation)
+    expect(expectOk(openaiProvider.parseResponse(response)).interpretation).toEqual(interpretation)
   })
 
   test('reports responses with nothing usable in them', () => {
-    expect(parseInterpretationResponse(null).kind).toBe('malformed')
-    expect(parseInterpretationResponse('a string').kind).toBe('malformed')
-    expect(parseInterpretationResponse({ status: 'completed' }).kind).toBe('malformed')
+    expect(openaiProvider.parseResponse(null).kind).toBe('malformed')
+    expect(openaiProvider.parseResponse('a string').kind).toBe('malformed')
+    expect(openaiProvider.parseResponse({ status: 'completed' }).kind).toBe('malformed')
     expect(
-      parseInterpretationResponse({ status: 'completed', output: [{ type: 'reasoning' }] }).kind
+      openaiProvider.parseResponse({ status: 'completed', output: [{ type: 'reasoning' }] }).kind
     ).toBe('malformed')
   })
 
   test('treats a response with no status as not completed', () => {
-    expect(parseInterpretationResponse({ output: [] }).kind).toBe('incomplete')
+    expect(openaiProvider.parseResponse({ output: [] }).kind).toBe('incomplete')
   })
 })
 
@@ -303,10 +304,10 @@ describe('requests', () => {
     expect(call?.url).toBe(RESPONSES_URL)
     expect(call?.init.method).toBe('POST')
     const headers = call?.init.headers as Record<string, string>
-    expect(headers.Authorization).toBe('Bearer sk-test')
-    expect(headers['Content-Type']).toBe('application/json')
+    expect(headers.authorization).toBe('Bearer sk-test')
+    expect(headers['content-type']).toBe('application/json')
     // No beta or version header on this endpoint.
-    expect(Object.keys(headers).sort()).toEqual(['Authorization', 'Content-Type'])
+    expect(Object.keys(headers).sort()).toEqual(['authorization', 'content-type'])
 
     const body = JSON.parse(String(call?.init.body))
     expect(body.model).toBe('gpt-5.6-luna')
@@ -320,8 +321,11 @@ describe('requests', () => {
     delete process.env.OPENAI_API_KEY
     try {
       const { fetchImpl, calls } = mockFetch([{ body: completedResponse(interpretation) }])
-      const result = expectError(await interpret({ context, turns }, { fetch: fetchImpl }))
+      const result = expectError(
+        await interpret({ context, turns }, { provider: 'openai', fetch: fetchImpl })
+      )
 
+      // The message names the provider's own variable, not a hardcoded one.
       expect(result.message).toContain('OPENAI_API_KEY')
       expect(result.retryable).toBe(false)
       expect(calls).toHaveLength(0)

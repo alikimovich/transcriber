@@ -1,13 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import {
-  buildRequestBody,
-  formatSetupContext,
-  formatWindow,
-  INSTRUCTIONS,
-  INTERPRET_MODEL,
-  INTERPRETATION_FORMAT,
-  PROMPT_CACHE_KEY
-} from '../src/prompt.ts'
+import { formatSetupContext, formatWindow, INSTRUCTIONS } from '../src/prompt.ts'
+import { INTERPRETATION_SCHEMA, openaiProvider, xaiProvider } from '../src/providers/index.ts'
 import { interpretationSchema, type SetupContext, type Turn } from '../src/types.ts'
 import { T0 } from './helpers.ts'
 
@@ -93,75 +86,20 @@ describe('transcript window', () => {
   })
 })
 
-describe('request body', () => {
-  const body = buildRequestBody({ context, turns })
+describe('structured output', () => {
+  const args = {
+    context: { jobDescription: 'staff engineer', notes: 'led migration' },
+    turns: [],
+    instructions: INSTRUCTIONS,
+    contextText: 'setup context',
+    windowText: 'transcript window'
+  }
 
-  test('uses the interpretation model and the documented latency settings', () => {
-    expect(body.model).toBe(INTERPRET_MODEL)
-    expect(body.model).toBe('gpt-5.6-luna')
-    expect(body.reasoning).toEqual({ effort: 'none' })
-    expect(body.text.verbosity).toBe('low')
-    expect(body.max_output_tokens).toBe(400)
-  })
-
-  test('does not let OpenAI retain the transcript, and keys the prompt cache', () => {
-    expect(body.store).toBe(false)
-    expect(body.prompt_cache_key).toBe(PROMPT_CACHE_KEY)
-    expect(body.prompt_cache_key).toBe('interview-lens:interpret-v1')
-  })
-
-  test('puts the static task description in instructions and the transcript last', () => {
-    expect(body.instructions).toBe(INSTRUCTIONS)
-    expect(body.input).toHaveLength(2)
-
-    const first = body.input[0]?.content[0]?.text ?? ''
-    const last = body.input[1]?.content[0]?.text ?? ''
-    expect(first).toContain('# Setup context')
-    expect(last).toContain('# Transcript so far')
-    // The volatile part has to come after the stable part or caching cannot hit.
-    expect(last).toContain('[interviewer]')
-    expect(first).not.toContain('[interviewer]')
-  })
-
-  test('carries the setup context and both channel labels into the request', () => {
-    const serialized = JSON.stringify(body)
-
-    expect(serialized).toContain('Staff engineer on the payments platform')
-    expect(serialized).toContain('Led the ledger rewrite.')
-    expect(serialized).toContain('Engineering manager for the payments org')
-    expect(serialized).toContain('[interviewer]')
-    expect(serialized).toContain('[candidate]')
-  })
-
-  test('uses input_text parts in a user role', () => {
-    for (const message of body.input) {
-      expect(message.role).toBe('user')
-      for (const part of message.content) expect(part.type).toBe('input_text')
-    }
-  })
-
-  test('honours a model override', () => {
-    expect(buildRequestBody({ context, turns, model: 'gpt-test' }).model).toBe('gpt-test')
-  })
-})
-
-describe('structured output format', () => {
-  test('uses the Responses shape, with name a sibling of schema', () => {
-    const format = INTERPRETATION_FORMAT
-
-    expect(format.type).toBe('json_schema')
-    expect(format.name).toBe('interpretation')
-    expect(format.strict).toBe(true)
-    expect(format.schema.type).toBe('object')
-    // The Chat Completions nesting would put these under `json_schema`.
-    expect(format).not.toHaveProperty('json_schema')
-  })
-
-  test('satisfies the constraints strict mode imposes', () => {
-    const schema = INTERPRETATION_FORMAT.schema
+  test('the shared schema satisfies what strict mode imposes', () => {
+    const schema = INTERPRETATION_SCHEMA
 
     expect(schema.additionalProperties).toBe(false)
-    // Under strict mode every property must be required; optionality is a null union.
+    // Every property must be required; optionality is expressed as a null union.
     const required: string[] = [...schema.required]
     const declared: string[] = Object.keys(schema.properties)
     expect(required.sort()).toEqual(declared.sort())
@@ -170,10 +108,58 @@ describe('structured output format', () => {
   })
 
   test('agrees with the client-side validator, so drift cannot go unnoticed', () => {
-    const jsonSchemaKeys = Object.keys(INTERPRETATION_FORMAT.schema.properties).sort()
+    const jsonSchemaKeys = Object.keys(INTERPRETATION_SCHEMA.properties).sort()
     const zodKeys = Object.keys(interpretationSchema.shape).sort()
 
     expect(zodKeys).toEqual(jsonSchemaKeys)
+  })
+
+  test('OpenAI uses the flattened Responses shape', () => {
+    const body = openaiProvider.buildRequest(args, 'k').body as Record<string, any>
+    const format = body.text.format
+
+    expect(format.type).toBe('json_schema')
+    expect(format.name).toBe('interpretation')
+    expect(format.strict).toBe(true)
+    // The Chat Completions nesting would put these under `json_schema`.
+    expect(format).not.toHaveProperty('json_schema')
+  })
+
+  test('xAI uses the nested Chat Completions shape', () => {
+    const body = xaiProvider.buildRequest(args, 'k').body as Record<string, any>
+    const format = body.response_format
+
+    expect(format.type).toBe('json_schema')
+    // The flattened Responses shape would put `name` here instead.
+    expect(format).not.toHaveProperty('name')
+    expect(format.json_schema.name).toBe('interpretation')
+    expect(format.json_schema.strict).toBe(true)
+    expect(format.json_schema.schema).toEqual(INTERPRETATION_SCHEMA)
+  })
+
+  test('both providers disable reasoning and cap output', () => {
+    const openai = openaiProvider.buildRequest(args, 'k').body as Record<string, any>
+    expect(openai.reasoning.effort).toBe('none')
+    expect(openai.max_output_tokens).toBeLessThanOrEqual(400)
+    expect(openai.store).toBe(false)
+
+    const xai = xaiProvider.buildRequest(args, 'k').body as Record<string, any>
+    // grok-4.3 reasons at `low` unless told otherwise, and that also makes
+    // penalties/stop legal to omit rather than error.
+    expect(xai.reasoning_effort).toBe('none')
+    // `max_tokens` is deprecated here and the replacement defaults to 128k.
+    expect(xai).not.toHaveProperty('max_tokens')
+    expect(xai.max_completion_tokens).toBeLessThanOrEqual(400)
+  })
+
+  test('the xAI request carries a cache key on both the body and the header', () => {
+    const request = xaiProvider.buildRequest(args, 'k')
+    const body = request.body as Record<string, any>
+
+    expect(body.prompt_cache_key).toBeTruthy()
+    // Sticky routing; without it repeat calls often land cache-cold.
+    expect(request.headers['x-grok-conv-id']).toBe(body.prompt_cache_key)
+    expect(request.headers.authorization).toBe('Bearer k')
   })
 })
 

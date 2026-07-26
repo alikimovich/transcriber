@@ -10,7 +10,13 @@ cd "$(dirname "$0")"
 REPO="$(pwd)"
 
 KEYCHAIN_SERVICE="interview-lens"
-KEYCHAIN_ACCOUNT="openai"
+CONFIG_DIR="$HOME/Library/Application Support/interview-lens"
+
+# Keep in step with cli/src/providers/*.ts
+PROVIDER_ID="xai"
+PROVIDER_LABEL="xAI (Grok)"
+PROVIDER_ENV="XAI_API_KEY"
+PROVIDER_CONSOLE="https://console.x.ai"
 
 bold=$(tput bold 2>/dev/null || true)
 dim=$(tput dim 2>/dev/null || true)
@@ -70,15 +76,20 @@ need_bun=0
 command -v bun >/dev/null 2>&1 || need_bun=1
 if [ "$need_bun" -eq 0 ]; then ok "bun $(bun --version)"; else warn "bun not installed"; fi
 
-have_key=0
-if [ -n "${OPENAI_API_KEY:-}" ]; then
-	have_key=1
-	ok "API key found in OPENAI_API_KEY"
-elif security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$KEYCHAIN_ACCOUNT" -w >/dev/null 2>&1; then
-	have_key=1
-	ok "API key found in the login Keychain"
-else
-	warn "no OpenAI API key configured"
+# A key for either provider counts as "configured"; which one we actually use
+# is settled in the questions below.
+key_for() { # $1 = account, $2 = env var name
+	[ -n "${!2:-}" ] && return 0
+	security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$1" -w >/dev/null 2>&1
+}
+have_xai_key=0
+have_openai_key=0
+key_for xai XAI_API_KEY && have_xai_key=1
+key_for openai OPENAI_API_KEY && have_openai_key=1
+if [ "$have_xai_key" -eq 1 ]; then ok "xAI key configured"; fi
+if [ "$have_openai_key" -eq 1 ]; then ok "OpenAI key configured"; fi
+if [ "$have_xai_key" -eq 0 ] && [ "$have_openai_key" -eq 0 ]; then
+	warn "no API key configured for either provider"
 fi
 
 # TCC keys grants to the code signature. A Developer ID keeps them across
@@ -103,6 +114,7 @@ say ""
 # ---------------------------------------------------------------------------
 
 API_KEY=""
+have_key=0
 CHOSEN_BINDIR=""
 DO_MIC=0
 DO_SETUP=0
@@ -111,14 +123,33 @@ if [ "$interactive" -eq 1 ]; then
 	say "${bold}A few questions, then it runs unattended${reset}"
 	say ""
 
+	say "  ${dim}Which model interprets the questions? Transcription is on-device"
+	say "  and free either way; this only affects interpretation.${reset}"
+	say "    1) xAI — Grok 4.3          (default)"
+	say "    2) OpenAI — GPT-5.6 Luna"
+	printf '  Choice? [1] '
+	read -r reply || true
+	case "${reply:-1}" in
+	2)
+		PROVIDER_ID="openai"
+		PROVIDER_LABEL="OpenAI"
+		PROVIDER_ENV="OPENAI_API_KEY"
+		PROVIDER_CONSOLE="https://platform.openai.com/api-keys"
+		have_key=$have_openai_key
+		;;
+	*) have_key=$have_xai_key ;;
+	esac
+
 	if [ "$have_key" -eq 0 ]; then
-		say "  ${dim}OpenAI API key. Transcription is on-device and free; the key is only"
-		say "  used to interpret questions (~7 cents per interview). Get one at"
-		say "  https://platform.openai.com/api-keys — it will be stored in your Keychain."
+		say ""
+		say "  ${dim}${PROVIDER_LABEL} API key — roughly 8 cents per interview."
+		say "  Get one at ${PROVIDER_CONSOLE}; it will be stored in your Keychain."
 		say "  Leave blank to skip; everything except interpretation still works.${reset}"
 		printf '  API key: '
 		read -rs API_KEY || true
 		printf '\n'
+	else
+		ok "${PROVIDER_LABEL} key already configured"
 	fi
 
 	if [ "$identity_count" -gt 1 ]; then
@@ -153,7 +184,7 @@ if [ "$interactive" -eq 1 ]; then
 	say ""
 else
 	# Non-interactive: take the key from the environment, accept defaults.
-	API_KEY="${OPENAI_API_KEY:-}"
+	API_KEY="${XAI_API_KEY:-}"
 	CHOSEN_BINDIR="$default_bindir"
 	say "${dim}non-interactive: using defaults${reset}"
 fi
@@ -192,13 +223,19 @@ ok "dependencies installed"
 if [ -n "$API_KEY" ]; then
 	# -U updates in place if the item already exists.
 	if security add-generic-password -U \
-		-s "$KEYCHAIN_SERVICE" -a "$KEYCHAIN_ACCOUNT" -w "$API_KEY" \
-		-l "Interview Lens (OpenAI)" 2>/dev/null; then
+		-s "$KEYCHAIN_SERVICE" -a "$PROVIDER_ID" -w "$API_KEY" \
+		-l "Interview Lens ($PROVIDER_LABEL)" 2>/dev/null; then
 		ok "API key stored in the login Keychain"
 	else
 		warn "could not write to the Keychain; export OPENAI_API_KEY instead"
 	fi
 fi
+
+# Persist the provider choice so every shell agrees on it.
+mkdir -p "$CONFIG_DIR"
+printf '{\n  "provider": "%s",\n  "model": null\n}\n' "$PROVIDER_ID" >"$CONFIG_DIR/settings.json"
+chmod 600 "$CONFIG_DIR/settings.json"
+ok "using $PROVIDER_LABEL"
 
 if [ -n "$CHOSEN_BINDIR" ]; then
 	mkdir -p "$CHOSEN_BINDIR"

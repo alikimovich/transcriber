@@ -13,6 +13,9 @@ Clarify          "Would an example from early discovery be most useful?"
 macOS 26+, Apple Silicon, single user. No GUI — a terminal UI, plus an MCP
 server so an agent can query the live transcript.
 
+Transcription runs on-device and free. Interpretation goes to **Grok
+(xAI)** by default; OpenAI is supported and switchable without a code change.
+
 ## How it's put together
 
 Two processes, one pipe:
@@ -59,7 +62,8 @@ anything already in place is detected and skipped.
 
 It will ask for:
 
-- your **OpenAI API key** (stored in the login Keychain, not a dotfile) —
+- which **provider** interprets questions — Grok (default) or OpenAI
+- that provider's **API key** (stored in the login Keychain, not a dotfile) —
   optional; everything except interpretation works without it
 - which **signing certificate** to use, if you have more than one
 - whether to put the `interview-lens` command on your PATH
@@ -115,6 +119,12 @@ interview-lens mcp                   # serve the transcript over MCP on stdio
 In a session: **space** interprets the current question, **c** clears the
 transcript, **q** quits.
 
+To switch provider, re-run `./install.sh`, or override a single run:
+
+```sh
+INTERVIEW_LENS_PROVIDER=openai interview-lens run --match zoom
+```
+
 ## Privacy
 
 - Audio is never written to disk, and never leaves the machine — transcription
@@ -123,11 +133,12 @@ transcript, **q** quits.
 - The only thing persisted is the setup context you type in (job description,
   notes, interviewer role), under
   `~/Library/Application Support/interview-lens/context.json`.
-- The only network call is the interpretation request to OpenAI, which sends
-  transcript text and your setup context. It is sent with `store: false`.
-- The API key lives in the login Keychain, not an exported shell variable, so
-  it isn't handed to every process you start. `OPENAI_API_KEY` still overrides
-  it when set.
+- The only network call is the interpretation request, which sends transcript
+  text and your setup context to the configured provider. Both providers are
+  called on stateless endpoints — nothing is retained server-side.
+- API keys live in the login Keychain, not an exported shell variable, so they
+  aren't handed to every process you start. `XAI_API_KEY` / `OPENAI_API_KEY`
+  still override when set.
 - No telemetry.
 
 ## Manual smoke test

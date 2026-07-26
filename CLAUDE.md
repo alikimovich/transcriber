@@ -17,8 +17,12 @@ macOS 26+, Apple Silicon, single user, no GUI.
 ```
 capture/     Swift CLI helper. Core Audio process tap + microphone +
              on-device SpeechAnalyzer. Emits JSONL on stdout, nothing else.
-cli/         bun + TypeScript. Transcript assembly, OpenAI call, Ink TUI,
-             MCP server, and the supervisor that owns the helper's lifecycle.
+cli/         bun + TypeScript. Transcript assembly, Ink TUI, MCP server, and
+             the supervisor that owns the helper's lifecycle.
+cli/src/providers/
+             One file per vendor. The prompt, the JSON Schema and the result
+             type are ours; a provider supplies only the endpoint, envelope,
+             auth header and response walk.
 spike/       The original capture spike. Kept because it is the smallest
              reproduction of the tap setup; useful when Core Audio misbehaves.
 SPIKE.md     What the spike proved, plus the silent-tap investigation.
@@ -52,9 +56,13 @@ bun run src/cli.tsx doctor
   SwiftPM manifest and no Xcode project. Adding files means adding them to
   `Sources/`; the build globs. **Command Line Tools are sufficient; full Xcode
   is not required.**
-- The API key comes from `loadApiKey()` in `cli/src/credentials.ts`:
-  `OPENAI_API_KEY` first, then the login Keychain. Don't reintroduce a direct
-  `process.env.OPENAI_API_KEY` read.
+- The API key comes from `loadApiKey(provider)` in `cli/src/credentials.ts`:
+  the provider's env var first, then the login Keychain. Don't reintroduce a
+  direct `process.env` read.
+- **Default provider is xAI (Grok 4.3).** `cli/src/interpret.ts` is the
+  transport and must stay vendor-agnostic — if it grows a
+  `provider.id === 'xai'` branch, that logic belongs in the provider. Adding a
+  vendor means one file in `providers/` plus a registry entry, nothing else.
 - Comments explain *why*, not *what*. Several comments in this codebase are
   load-bearing warnings; don't delete them as noise.
 
@@ -116,19 +124,46 @@ audio device, both invisible. `SIGTERM` and wait.
   `SpeechTranscriber.installedLocales` is unreliable, and
   `assetInstallationRequest` returns non-nil even when already installed.
 
+### Providers
+
+- **Grok 4.3, not 4.5, and deliberately.** 4.5 cannot disable reasoning — its
+  floor is `low`, its default is `high` — so every call burns reasoning tokens
+  before emitting any JSON. For a latency-critical extraction that is exactly
+  backwards. 4.3 is the only current model accepting `reasoning_effort: "none"`,
+  and it is cheaper.
+- **`grok-4`, `grok-4-fast`, `grok-4.1-*`, `grok-3` and `grok-code-fast-1` no
+  longer exist** (retired 15 May 2026). The slugs still resolve — they silently
+  redirect to `grok-4.3` — so a stale model ID gives you no error, just
+  different behaviour and different billing.
+- **The two vendors nest the schema differently.** OpenAI Responses flattens it
+  (`text.format` with `name` a sibling of `schema`); xAI Chat Completions nests
+  it (`response_format.json_schema.{name,schema,strict}`). Copying one shape to
+  the other endpoint fails. Both are covered by tests.
+- **xAI `finish_reason` can be `end_turn`** — a success terminal with no OpenAI
+  equivalent. A switch handling only `stop`/`length` falls through.
+- **xAI refusals are a sibling field** (`message.refusal`) with `content: null`,
+  not a content part. Check it before parsing.
+- **xAI reasoning lands in `message.reasoning_content`**, so it never
+  contaminates the JSON — but `max_completion_tokens` defaults to **128,000**,
+  not the model max. Always cap it.
+- **`presence_penalty`, `frequency_penalty` and `stop` hard-error on xAI
+  reasoning models** rather than being ignored.
+- **xAI documents no rate-limit headers.** `suggestedDelayMs` returns null there
+  and the transport falls back to blind exponential backoff, which is what
+  xAI's own docs recommend.
+- Both providers' prompt caches match a prefix from the start of the message
+  list, so the stable setup context is sent as its own message ahead of the
+  volatile transcript. Don't merge them back into one blob.
+
 ### TypeScript
 
 - **The MCP TypeScript SDK's GitHub README is for v2, which is not on npm.**
   Pinned here is `@modelcontextprotocol/sdk@1.29.0`, where `inputSchema` takes
   a **raw Zod shape** (`{ q: z.string() }`), not `z.object({...})`, and
   `registerTool`/`registerResource` replace the deprecated `tool()`/`resource()`.
-- **OpenAI Responses API**, not Chat Completions. `text.format` puts `name` as
-  a *sibling* of `schema` — the extra `json_schema` nesting is the Chat
-  Completions shape and fails here. Strict mode requires every property in
-  `required`; optional fields are `["string","null"]` unions.
-- Read results by walking `output[]` for `type === "message"`, then `content[]`
-  for `output_text`. **Do not** use `output_text` (SDK-only) or index
-  `output[0]` (that's a `reasoning` item when reasoning is on).
+- OpenAI reads results by walking `output[]` for `type === "message"`, then
+  `content[]` for `output_text`. **Do not** use `output_text` (SDK-only) or
+  index `output[0]` (that's a `reasoning` item when reasoning is on).
 - `interpret()` never throws — it returns a union discriminated on `kind`.
   Handle `refusal`, `incomplete`, `malformed`, and `error`.
 - Use `readline` over child stdout, never `chunk.split('\n')` — the latter
