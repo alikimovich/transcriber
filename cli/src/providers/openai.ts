@@ -3,10 +3,9 @@
 // Kept alongside the xAI provider so switching back is a config change rather
 // than a rewrite.
 
-import { interpretationSchema } from '../types.ts'
-import { describe, isRecord, readResponsesUsage, str, summarizeIssues } from './parsing.ts'
+import { describe, isRecord, readResponsesUsage, str } from './parsing.ts'
 import {
-  type BuildArgs,
+  type CompletionArgs,
   INTERPRETATION_SCHEMA,
   type ParsedResponse,
   type Provider,
@@ -15,12 +14,8 @@ import {
 
 export const RESPONSES_URL = 'https://api.openai.com/v1/responses'
 export const DEFAULT_MODEL = 'gpt-5.6-luna'
-export const MAX_OUTPUT_TOKENS = 400
 
-/** Bump the suffix whenever the cached prefix (instructions/schema) changes. */
-export const PROMPT_CACHE_KEY = 'interview-lens:interpret-v1'
-
-function buildRequest(args: BuildArgs, apiKey: string): ProviderRequest {
+function buildRequest(args: CompletionArgs, apiKey: string): ProviderRequest {
   return {
     url: RESPONSES_URL,
     headers: {
@@ -29,28 +24,28 @@ function buildRequest(args: BuildArgs, apiKey: string): ProviderRequest {
     },
     body: {
       model: args.model ?? DEFAULT_MODEL,
-      instructions: args.instructions,
-      input: [
-        { role: 'user', content: [{ type: 'input_text', text: args.contextText }] },
-        { role: 'user', content: [{ type: 'input_text', text: args.windowText }] }
-      ],
+      instructions: args.system,
+      input: args.messages.map((text: string) => ({
+        role: 'user',
+        content: [{ type: 'input_text', text }]
+      })),
       // Reasoning tokens are generated serially before any visible output, so
-      // turning them off is the single biggest latency lever here.
-      reasoning: { effort: 'none' },
+      // turning them off is the single biggest latency lever on the hint path.
+      reasoning: { effort: args.reasoning === true ? 'medium' : 'none' },
       text: {
         verbosity: 'low',
         // On the Responses API `name`/`strict`/`schema` are siblings. The nested
         // `json_schema` object is the Chat Completions shape and is rejected.
         format: {
           type: 'json_schema',
-          name: 'interpretation',
+          name: args.schemaName,
           strict: true,
-          schema: INTERPRETATION_SCHEMA
+          schema: args.schema
         }
       },
-      max_output_tokens: MAX_OUTPUT_TOKENS,
+      max_output_tokens: args.maxOutputTokens,
       store: false,
-      prompt_cache_key: PROMPT_CACHE_KEY
+      prompt_cache_key: args.cacheKey
     }
   }
 }
@@ -113,20 +108,9 @@ function parseResponse(value: unknown): ParsedResponse {
     return { kind: 'malformed', message: `output was not JSON: ${describe(cause)}`, raw }
   }
 
-  // Defense in depth: strict mode should guarantee this, but schema drift should
-  // degrade to "no suggestion", not a crash.
-  const validated = interpretationSchema.safeParse(parsed)
-  if (!validated.success) {
-    return {
-      kind: 'malformed',
-      message: `output did not match the interpretation schema: ${summarizeIssues(validated.error)}`,
-      raw
-    }
-  }
-
   return {
     kind: 'ok',
-    interpretation: validated.data,
+    data: parsed,
     responseId: str(value.id),
     usage: readResponsesUsage(value.usage)
   }

@@ -106,6 +106,11 @@ function deterministic(overrides: InterpretOptions = {}): InterpretOptions {
   }
 }
 
+function expectParsedOk(result: ReturnType<typeof openaiProvider.parseResponse>) {
+  if (result.kind !== 'ok') throw new Error(`expected ok, got ${JSON.stringify(result)}`)
+  return result
+}
+
 function expectOk(result: InterpretResult) {
   if (result.kind !== 'ok') throw new Error(`expected ok, got ${JSON.stringify(result)}`)
   return result
@@ -120,9 +125,9 @@ function expectError(result: InterpretResult) {
 
 describe('response parsing', () => {
   test('extracts the interpretation past a leading reasoning item', () => {
-    const result = expectOk(openaiProvider.parseResponse(completedResponse(interpretation)))
+    const result = expectParsedOk(openaiProvider.parseResponse(completedResponse(interpretation)))
 
-    expect(result.interpretation).toEqual(interpretation)
+    expect(result.data).toEqual(interpretation)
     expect(result.responseId).toBe('resp_abc123')
     expect(result.usage).toEqual({
       inputTokens: 812,
@@ -189,21 +194,20 @@ describe('response parsing', () => {
     }
   })
 
-  test('rejects valid JSON that is not an interpretation', () => {
-    const result = openaiProvider.parseResponse(
-      completedResponse({ intent: 'x', emphasis: 'y', confidence: 'certain' })
-    )
+  test('passes well-formed non-interpretation JSON through — validation is downstream', () => {
+    const payload = { intent: 'x', emphasis: 'y', confidence: 'certain' }
+    const result = openaiProvider.parseResponse(completedResponse(payload))
 
-    expect(result.kind).toBe('malformed')
-    if (result.kind === 'malformed') expect(result.message).toContain('schema')
+    expect(result.kind).toBe('ok')
+    if (result.kind !== 'ok') return
+    expect(result.data).toEqual(payload)
   })
 
-  test('rejects an interpretation missing clarification', () => {
+  test('passes an interpretation missing clarification through to the validator', () => {
     const { clarification: _omitted, ...withoutClarification } = interpretation
 
-    expect(openaiProvider.parseResponse(completedResponse(withoutClarification)).kind).toBe(
-      'malformed'
-    )
+    // The provider hands it back; interpret() is what rejects it (tested below).
+    expect(openaiProvider.parseResponse(completedResponse(withoutClarification)).kind).toBe('ok')
   })
 
   test('concatenates multiple output_text parts', () => {
@@ -220,7 +224,7 @@ describe('response parsing', () => {
       ]
     })
 
-    expect(expectOk(openaiProvider.parseResponse(response)).interpretation).toEqual(interpretation)
+    expect(expectParsedOk(openaiProvider.parseResponse(response)).data).toEqual(interpretation)
   })
 
   test('reports responses with nothing usable in them', () => {
@@ -503,5 +507,36 @@ describe('cancellation', () => {
     expect(result.message).toContain('timed out')
     expect(result.retryable).toBe(true)
     expect(result.aborted).toBe(false)
+  })
+})
+
+describe('schema validation', () => {
+  // Strict mode should make this unreachable, but a model change or schema
+  // drift must degrade to "no suggestion" rather than surfacing junk.
+  test('interpret rejects well-formed JSON that is not an interpretation', async () => {
+    const { fetchImpl } = mockFetch([{ body: completedResponse({ hello: 'world' }) }])
+
+    const result = await interpret({ context, turns }, deterministic({ fetch: fetchImpl }))
+
+    expect(result.kind).toBe('malformed')
+  })
+
+  test('interpret rejects an interpretation missing a required field', async () => {
+    const { clarification: _omitted, ...withoutClarification } = interpretation
+    const { fetchImpl } = mockFetch([{ body: completedResponse(withoutClarification) }])
+
+    const result = await interpret({ context, turns }, deterministic({ fetch: fetchImpl }))
+
+    expect(result.kind).toBe('malformed')
+  })
+
+  test('interpret rejects a confidence value outside the enum', async () => {
+    const { fetchImpl } = mockFetch([
+      { body: completedResponse({ ...interpretation, confidence: 'certain' }) }
+    ])
+
+    const result = await interpret({ context, turns }, deterministic({ fetch: fetchImpl }))
+
+    expect(result.kind).toBe('malformed')
   })
 })

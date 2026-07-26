@@ -88,11 +88,12 @@ describe('transcript window', () => {
 
 describe('structured output', () => {
   const args = {
-    context: { jobDescription: 'staff engineer', notes: 'led migration' },
-    turns: [],
-    instructions: INSTRUCTIONS,
-    contextText: 'setup context',
-    windowText: 'transcript window'
+    system: INSTRUCTIONS,
+    messages: ['setup context', 'transcript window'],
+    schema: INTERPRETATION_SCHEMA,
+    schemaName: 'interpretation',
+    maxOutputTokens: 400,
+    cacheKey: 'interview-lens:interpret-v1'
   }
 
   test('the shared schema satisfies what strict mode imposes', () => {

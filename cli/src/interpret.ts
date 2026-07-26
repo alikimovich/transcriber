@@ -7,23 +7,44 @@
 import { loadApiKey } from './credentials.ts'
 import { formatSetupContext, formatWindow, INSTRUCTIONS } from './prompt.ts'
 import {
+  type CompletionArgs,
+  INTERPRETATION_SCHEMA,
   type ParsedResponse,
   type Provider,
   type ProviderId,
   type ProviderRequest,
-  resolveProvider
+  resolveProvider,
+  type TokenUsage
 } from './providers/index.ts'
-import { isRecord, str } from './providers/parsing.ts'
+import { isRecord, str, summarizeIssues } from './providers/parsing.ts'
 import { backoff, formatMs, suggestedDelayMs } from './retry.ts'
-import type { SetupContext, Turn } from './types.ts'
+import { type Interpretation, interpretationSchema, type SetupContext, type Turn } from './types.ts'
 
 const DEFAULT_MAX_RETRIES = 2
 const DEFAULT_BASE_DELAY_MS = 400
 const DEFAULT_MAX_DELAY_MS = 8_000
 const DEFAULT_TIMEOUT_MS = 20_000
 
-export type InterpretResult =
+/** What the generic `complete()` returns. */
+export type CompletionResult =
   | ParsedResponse
+  | {
+      kind: 'error'
+      message: string
+      status: number | null
+      retryable: boolean
+      retryAfterMs: number | null
+      aborted: boolean
+    }
+
+export type InterpretResult =
+  | {
+      kind: 'ok'
+      interpretation: Interpretation
+      responseId: string | null
+      usage: TokenUsage | null
+    }
+  | Exclude<ParsedResponse, { kind: 'ok' }>
   /** Transport, auth or rate-limit failure. */
   | {
       kind: 'error'
@@ -49,6 +70,10 @@ export type InterpretArgs = {
   turns: Turn[]
   model?: string
 }
+
+/** Small: this is prepended to every keypress, and latency is the whole point. */
+const INTERPRET_MAX_OUTPUT_TOKENS = 400
+const INTERPRET_CACHE_KEY = 'interview-lens:interpret-v1'
 
 export type InterpretOptions = {
   /** Overrides the env var and the saved setting. */
@@ -81,6 +106,47 @@ export async function interpret(
   args: InterpretArgs,
   options: InterpretOptions = {}
 ): Promise<InterpretResult> {
+  const result = await complete(
+    {
+      system: INSTRUCTIONS,
+      // Setup context first so it can serve as a stable cache prefix; the
+      // transcript window changes on every call and must come last.
+      messages: [formatSetupContext(args.context), formatWindow(args.turns)],
+      schema: INTERPRETATION_SCHEMA,
+      schemaName: 'interpretation',
+      maxOutputTokens: INTERPRET_MAX_OUTPUT_TOKENS,
+      cacheKey: INTERPRET_CACHE_KEY,
+      model: options.model ?? args.model
+    },
+    options
+  )
+
+  if (result.kind !== 'ok') return result
+
+  // Defense in depth: strict mode should guarantee this, but schema drift
+  // should degrade to "no suggestion", not a crash.
+  const validated = interpretationSchema.safeParse(result.data)
+  if (!validated.success) {
+    return {
+      kind: 'malformed',
+      message: `output did not match the interpretation schema: ${summarizeIssues(validated.error)}`,
+      raw: JSON.stringify(result.data).slice(0, 500)
+    }
+  }
+
+  return {
+    kind: 'ok',
+    interpretation: validated.data,
+    responseId: result.responseId,
+    usage: result.usage
+  }
+}
+
+/** Ask the configured provider for schema-conformant JSON. Never throws. */
+export async function complete(
+  args: CompletionArgs,
+  options: InterpretOptions = {}
+): Promise<CompletionResult> {
   const provider = resolveProvider(options.provider, options.savedProvider)
   const apiKey = options.apiKey ?? loadApiKey(provider)
   if (apiKey === undefined || apiKey === '') {
@@ -90,17 +156,7 @@ export async function interpret(
     )
   }
 
-  const request = provider.buildRequest(
-    {
-      context: args.context,
-      turns: args.turns,
-      instructions: INSTRUCTIONS,
-      contextText: formatSetupContext(args.context),
-      windowText: formatWindow(args.turns),
-      model: options.model ?? args.model
-    },
-    apiKey
-  )
+  const request = provider.buildRequest(args, apiKey)
   if (options.baseUrl !== undefined) request.url = options.baseUrl
 
   return sendRequest(provider, request, options)
@@ -111,7 +167,7 @@ export async function sendRequest(
   provider: Provider,
   request: ProviderRequest,
   options: InterpretOptions = {}
-): Promise<InterpretResult> {
+): Promise<CompletionResult> {
   const doFetch = options.fetch ?? ((input, init) => fetch(input, init))
   const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)))
   const random = options.random ?? Math.random
@@ -208,7 +264,7 @@ async function attemptFetch(
   }
 }
 
-async function readSuccess(provider: Provider, response: Response): Promise<InterpretResult> {
+async function readSuccess(provider: Provider, response: Response): Promise<CompletionResult> {
   let text: string
   try {
     text = await response.text()
@@ -261,7 +317,7 @@ function transportError(
     retryAfterMs?: number | null
     aborted?: boolean
   }
-): InterpretResult {
+): CompletionResult & { kind: 'error' } {
   return {
     kind: 'error',
     message,

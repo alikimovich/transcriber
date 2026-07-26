@@ -5,11 +5,13 @@
 // the response — lives behind this interface. Three provider changes in as many
 // days is what motivated it.
 
-import type { Interpretation, SetupContext, Turn } from '../types.ts'
+// Providers are deliberately ignorant of what is being asked. They know how to
+// send a system prompt plus ordered user messages and get schema-conformant
+// JSON back; interpreting that JSON is the caller's job.
 
 export type ProviderId = 'openai' | 'xai'
 
-/** The JSON Schema both providers enforce. Vendors differ only in the envelope. */
+/** The interpretation schema. Vendors differ only in the envelope around it. */
 export const INTERPRETATION_SCHEMA = {
   type: 'object',
   properties: {
@@ -40,16 +42,29 @@ export const INTERPRETATION_SCHEMA = {
   additionalProperties: false
 } as const
 
-export type BuildArgs = {
-  context: SetupContext
-  turns: Turn[]
-  instructions: string
-  /** Rendered setup context. Stable across a session — keep it first so it can
-   *  serve as a cache prefix. */
-  contextText: string
-  /** Rendered transcript window. Volatile; must come last. */
-  windowText: string
+export type CompletionArgs = {
+  /** System prompt. Stable — leads the prefix cache. */
+  system: string
+  /**
+   * User messages in order, stable content first. Both providers match their
+   * prefix cache message-by-message from the start of the list, so putting
+   * volatile content last is what makes a cache hit possible at all.
+   */
+  messages: string[]
+  /** JSON Schema the response must conform to. */
+  schema: object
+  /** Schema name; must match `[a-zA-Z0-9_-]`. */
+  schemaName: string
+  maxOutputTokens: number
   model?: string
+  /** Stable key for the provider's prefix cache. */
+  cacheKey: string
+  /**
+   * Whether the model should reason before answering. Off for latency-critical
+   * calls; on for one-off work like ingesting a resume, where quality matters
+   * more than the first token arriving quickly.
+   */
+  reasoning?: boolean
 }
 
 export type ProviderRequest = {
@@ -68,7 +83,8 @@ export type ProviderRequest = {
 export type ParsedResponse =
   | {
       kind: 'ok'
-      interpretation: Interpretation
+      /** Parsed JSON. Validating its shape is the caller's job. */
+      data: unknown
       responseId: string | null
       usage: TokenUsage | null
     }
@@ -94,6 +110,6 @@ export type Provider = {
   keychainAccount: string
   /** Where a user gets a key, for the installer and error messages. */
   consoleUrl: string
-  buildRequest(args: BuildArgs, apiKey: string): ProviderRequest
+  buildRequest(args: CompletionArgs, apiKey: string): ProviderRequest
   parseResponse(value: unknown): ParsedResponse
 }

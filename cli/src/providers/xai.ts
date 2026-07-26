@@ -7,10 +7,9 @@
 // one-shot call gains nothing from the stateful endpoint. "Legacy" here means
 // new features land elsewhere first, not imminent removal.
 
-import { interpretationSchema } from '../types.ts'
-import { describe, isRecord, readChatUsage, str, summarizeIssues } from './parsing.ts'
+import { describe, isRecord, readChatUsage, str } from './parsing.ts'
 import {
-  type BuildArgs,
+  type CompletionArgs,
   INTERPRETATION_SCHEMA,
   type ParsedResponse,
   type Provider,
@@ -30,12 +29,7 @@ export const CHAT_COMPLETIONS_URL = 'https://api.x.ai/v1/chat/completions'
  */
 export const DEFAULT_MODEL = 'grok-4.3'
 
-/** Default is 128,000 — far too high to leave alone. */
-export const MAX_COMPLETION_TOKENS = 400
-
-export const PROMPT_CACHE_KEY = 'interview-lens:interpret-v1'
-
-function buildRequest(args: BuildArgs, apiKey: string): ProviderRequest {
+function buildRequest(args: CompletionArgs, apiKey: string): ProviderRequest {
   return {
     url: CHAT_COMPLETIONS_URL,
     headers: {
@@ -43,31 +37,30 @@ function buildRequest(args: BuildArgs, apiKey: string): ProviderRequest {
       authorization: `Bearer ${apiKey}`,
       // Sticky routing, so repeat calls land on a server that already holds the
       // cached prefix. Without it you frequently get a cache-cold instance.
-      'x-grok-conv-id': PROMPT_CACHE_KEY
+      'x-grok-conv-id': args.cacheKey
     },
     body: {
       model: args.model ?? DEFAULT_MODEL,
       // The single biggest latency lever. Note this also makes the request
       // legal: presence/frequency penalties and `stop` hard-error on reasoning
       // models, and 4.3 reasons at `low` unless told not to.
-      reasoning_effort: 'none',
+      reasoning_effort: args.reasoning === true ? 'low' : 'none',
       // `max_tokens` is deprecated here, and the replacement defaults to 128k.
-      max_completion_tokens: MAX_COMPLETION_TOKENS,
+      max_completion_tokens: args.maxOutputTokens,
       temperature: 0,
-      prompt_cache_key: PROMPT_CACHE_KEY,
+      prompt_cache_key: args.cacheKey,
       messages: [
-        { role: 'system', content: args.instructions },
-        { role: 'user', content: args.contextText },
-        { role: 'user', content: args.windowText }
+        { role: 'system', content: args.system },
+        ...args.messages.map((content: string) => ({ role: 'user', content }))
       ],
       // Chat Completions nests the schema under `json_schema`. The Responses
       // API flattens it — do not copy this shape across endpoints.
       response_format: {
         type: 'json_schema',
         json_schema: {
-          name: 'interpretation',
+          name: args.schemaName,
           strict: true,
-          schema: INTERPRETATION_SCHEMA
+          schema: args.schema
         }
       }
     }
@@ -127,18 +120,9 @@ function parseResponse(value: unknown): ParsedResponse {
     return { kind: 'malformed', message: `output was not JSON: ${describe(cause)}`, raw }
   }
 
-  const validated = interpretationSchema.safeParse(parsed)
-  if (!validated.success) {
-    return {
-      kind: 'malformed',
-      message: `output did not match the interpretation schema: ${summarizeIssues(validated.error)}`,
-      raw
-    }
-  }
-
   return {
     kind: 'ok',
-    interpretation: validated.data,
+    data: parsed,
     responseId: str(value.id),
     usage: readChatUsage(value.usage)
   }
