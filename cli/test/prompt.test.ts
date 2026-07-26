@@ -86,6 +86,15 @@ describe('transcript window', () => {
   })
 })
 
+/** Provider bodies are deliberately untyped at the seam; narrow here. */
+function field(body: unknown, path: string): unknown {
+  return path.split('.').reduce<unknown>((value, key) => {
+    return typeof value === 'object' && value !== null
+      ? (value as Record<string, unknown>)[key]
+      : undefined
+  }, body)
+}
+
 describe('structured output', () => {
   const args = {
     system: INSTRUCTIONS,
@@ -116,8 +125,8 @@ describe('structured output', () => {
   })
 
   test('OpenAI uses the flattened Responses shape', () => {
-    const body = openaiProvider.buildRequest(args, 'k').body as Record<string, any>
-    const format = body.text.format
+    const body = openaiProvider.buildRequest(args, 'k').body
+    const format = field(body, 'text.format') as Record<string, unknown>
 
     expect(format.type).toBe('json_schema')
     expect(format.name).toBe('interpretation')
@@ -127,24 +136,24 @@ describe('structured output', () => {
   })
 
   test('xAI uses the nested Chat Completions shape', () => {
-    const body = xaiProvider.buildRequest(args, 'k').body as Record<string, any>
-    const format = body.response_format
+    const body = xaiProvider.buildRequest(args, 'k').body
+    const format = field(body, 'response_format') as Record<string, unknown>
 
     expect(format.type).toBe('json_schema')
     // The flattened Responses shape would put `name` here instead.
     expect(format).not.toHaveProperty('name')
-    expect(format.json_schema.name).toBe('interpretation')
-    expect(format.json_schema.strict).toBe(true)
-    expect(format.json_schema.schema).toEqual(INTERPRETATION_SCHEMA)
+    expect(field(format, 'json_schema.name')).toBe('interpretation')
+    expect(field(format, 'json_schema.strict')).toBe(true)
+    expect(field(format, 'json_schema.schema')).toEqual(INTERPRETATION_SCHEMA)
   })
 
   test('both providers disable reasoning and cap output', () => {
-    const openai = openaiProvider.buildRequest(args, 'k').body as Record<string, any>
-    expect(openai.reasoning.effort).toBe('none')
-    expect(openai.max_output_tokens).toBeLessThanOrEqual(400)
-    expect(openai.store).toBe(false)
+    const openai = openaiProvider.buildRequest(args, 'k').body
+    expect(field(openai, 'reasoning.effort')).toBe('none')
+    expect(field(openai, 'max_output_tokens')).toBeLessThanOrEqual(400)
+    expect(field(openai, 'store')).toBe(false)
 
-    const xai = xaiProvider.buildRequest(args, 'k').body as Record<string, any>
+    const xai = xaiProvider.buildRequest(args, 'k').body as Record<string, unknown>
     // grok-4.3 reasons at `low` unless told otherwise, and that also makes
     // penalties/stop legal to omit rather than error.
     expect(xai.reasoning_effort).toBe('none')
@@ -155,11 +164,11 @@ describe('structured output', () => {
 
   test('the xAI request carries a cache key on both the body and the header', () => {
     const request = xaiProvider.buildRequest(args, 'k')
-    const body = request.body as Record<string, any>
+    const body = request.body as Record<string, unknown>
 
     expect(body.prompt_cache_key).toBeTruthy()
     // Sticky routing; without it repeat calls often land cache-cold.
-    expect(request.headers['x-grok-conv-id']).toBe(body.prompt_cache_key)
+    expect(request.headers['x-grok-conv-id']).toBe(String(body.prompt_cache_key))
     expect(request.headers.authorization).toBe('Bearer k')
   })
 })

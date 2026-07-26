@@ -48,6 +48,12 @@ an Electron app, which can only capture all system output.
 minutes of channel-labelled transcript and works out what was asked. Removing
 the selector removed a whole class of bugs.
 
+**Lens does not build your context — an agent does.** Your resume, the job
+posting and your notes live in a markdown wiki in your Obsidian vault, written
+and maintained by Claude Code through the `/interview` skill. Lens reads one
+short file out of it. Claude Code already reads PDFs, fetches pages and writes
+markdown, and it can ask you questions while it works; a subcommand can't.
+
 ## Install
 
 ```sh
@@ -88,6 +94,44 @@ changes. Both work.
 ./capture/build.sh          # → capture/ilcapture, auto-detects a signing identity
 cd cli && bun install
 ```
+
+## Your interview context
+
+```
+~/memory/interview-lens/          in your Obsidian vault
+  AGENTS.md                       conventions, so any agent knows the layout
+  index.md                        generated catalogue
+  log.md                          what was ingested, when
+  profile.md                      who you are
+  experience/<slug>.md            one page per role or project
+  target/<slug>.md                one page per interview
+  target/<slug>.briefing.md       ← the only file Lens reads
+  notes.md                        yours
+```
+
+Build it in Claude Code:
+
+```
+/interview
+```
+
+Give it a resume, a job posting URL, a folder of notes — it reads them, asks
+about anything ambiguous, and writes the wiki. Everything is markdown you can
+open and edit in Obsidian.
+
+**The briefing is deliberately separate from the wiki.** It goes in front of the
+transcript on every keypress, so it has to stay under about 3000 characters
+while the wiki behind it can be as long as you like.
+
+```sh
+interview-lens target new acme     # start a new interview
+interview-lens target list         # * marks the active one
+interview-lens context show        # exactly what gets sent
+interview-lens context edit        # open the wiki
+```
+
+If you never set up a wiki, `interview-lens setup` still works as a manual
+fallback.
 
 ## Permissions to grant
 

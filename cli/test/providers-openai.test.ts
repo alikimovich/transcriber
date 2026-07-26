@@ -5,12 +5,14 @@ import {
   type InterpretResult,
   interpret
 } from '../src/interpret.ts'
+import { formatSetupContext } from '../src/prompt.ts'
 import { openaiProvider, RESPONSES_URL } from '../src/providers/index.ts'
 import { parseGoDuration, suggestedDelayMs } from '../src/retry.ts'
 import type { Interpretation, SetupContext, Turn } from '../src/types.ts'
 import { T0 } from './helpers.ts'
 
 const context: SetupContext = { jobDescription: 'Backend role', notes: 'Ten years of Go' }
+const contextText = formatSetupContext(context)
 
 const turns: Turn[] = [
   {
@@ -299,7 +301,7 @@ describe('requests', () => {
     const { fetchImpl, calls } = mockFetch([{ body: completedResponse(interpretation) }])
 
     const result = expectOk(
-      await interpret({ context, turns }, deterministic({ fetch: fetchImpl }))
+      await interpret({ contextText, turns }, deterministic({ fetch: fetchImpl }))
     )
 
     expect(result.interpretation).toEqual(interpretation)
@@ -326,7 +328,7 @@ describe('requests', () => {
     try {
       const { fetchImpl, calls } = mockFetch([{ body: completedResponse(interpretation) }])
       const result = expectError(
-        await interpret({ context, turns }, { provider: 'openai', fetch: fetchImpl })
+        await interpret({ contextText, turns }, { provider: 'openai', fetch: fetchImpl })
       )
 
       // The message names the provider's own variable, not a hardcoded one.
@@ -341,7 +343,7 @@ describe('requests', () => {
   test('reports a 200 whose body is not JSON as malformed', async () => {
     const { fetchImpl } = mockFetch([{ body: '<html>gateway</html>' }])
 
-    const result = await interpret({ context, turns }, deterministic({ fetch: fetchImpl }))
+    const result = await interpret({ contextText, turns }, deterministic({ fetch: fetchImpl }))
 
     expect(result.kind).toBe('malformed')
   })
@@ -366,7 +368,7 @@ describe('retries', () => {
     ])
     const { options, sleeps } = withSleepSpy({ fetch: fetchImpl })
 
-    expectOk(await interpret({ context, turns }, options))
+    expectOk(await interpret({ contextText, turns }, options))
 
     expect(calls).toHaveLength(2)
     // Half jitter with random() === 0.5 lands exactly mid-band.
@@ -377,7 +379,7 @@ describe('retries', () => {
     const { fetchImpl, calls } = mockFetch([{ status: 500, body: { error: { message: 'boom' } } }])
     const { options, sleeps } = withSleepSpy({ fetch: fetchImpl, maxRetries: 2 })
 
-    const result = expectError(await interpret({ context, turns }, options))
+    const result = expectError(await interpret({ contextText, turns }, options))
 
     expect(calls).toHaveLength(3)
     expect(sleeps).toEqual([300, 600])
@@ -394,7 +396,7 @@ describe('retries', () => {
     ])
     const { options } = withSleepSpy({ fetch: fetchImpl, maxRetries: 3 })
 
-    expectOk(await interpret({ context, turns }, options))
+    expectOk(await interpret({ contextText, turns }, options))
 
     expect(calls).toHaveLength(3)
   })
@@ -403,7 +405,7 @@ describe('retries', () => {
     const { fetchImpl, calls } = mockFetch([{ status, body: { error: { message: 'nope' } } }])
     const { options, sleeps } = withSleepSpy({ fetch: fetchImpl })
 
-    const result = expectError(await interpret({ context, turns }, options))
+    const result = expectError(await interpret({ contextText, turns }, options))
 
     expect(calls).toHaveLength(1)
     expect(sleeps).toEqual([])
@@ -418,7 +420,7 @@ describe('retries', () => {
     ])
     const { options, sleeps } = withSleepSpy({ fetch: fetchImpl })
 
-    expectOk(await interpret({ context, turns }, options))
+    expectOk(await interpret({ contextText, turns }, options))
 
     expect(sleeps).toEqual([2_000])
   })
@@ -429,7 +431,7 @@ describe('retries', () => {
     ])
     const { options, sleeps } = withSleepSpy({ fetch: fetchImpl })
 
-    const result = expectError(await interpret({ context, turns }, options))
+    const result = expectError(await interpret({ contextText, turns }, options))
 
     // Sitting on a six-minute backoff mid-interview is worse than saying so.
     expect(calls).toHaveLength(1)
@@ -450,7 +452,7 @@ describe('retries', () => {
       onRetry: (info) => seen.push({ attempt: info.attempt, status: info.status })
     })
 
-    expectOk(await interpret({ context, turns }, options))
+    expectOk(await interpret({ contextText, turns }, options))
 
     expect(seen).toEqual([{ attempt: 0, status: 500 }])
   })
@@ -464,7 +466,7 @@ describe('cancellation', () => {
 
     const result = expectError(
       await interpret(
-        { context, turns },
+        { contextText, turns },
         deterministic({ fetch: fetchImpl, signal: controller.signal })
       )
     )
@@ -481,7 +483,7 @@ describe('cancellation', () => {
 
     const result = expectError(
       await interpret(
-        { context, turns },
+        { contextText, turns },
         deterministic({
           fetch: hangingFetch,
           signal: controller.signal,
@@ -499,7 +501,7 @@ describe('cancellation', () => {
   test('times out a hung request and treats it as retryable', async () => {
     const result = expectError(
       await interpret(
-        { context, turns },
+        { contextText, turns },
         deterministic({ fetch: hangingFetch, timeoutMs: 10, maxRetries: 0 })
       )
     )
@@ -516,7 +518,7 @@ describe('schema validation', () => {
   test('interpret rejects well-formed JSON that is not an interpretation', async () => {
     const { fetchImpl } = mockFetch([{ body: completedResponse({ hello: 'world' }) }])
 
-    const result = await interpret({ context, turns }, deterministic({ fetch: fetchImpl }))
+    const result = await interpret({ contextText, turns }, deterministic({ fetch: fetchImpl }))
 
     expect(result.kind).toBe('malformed')
   })
@@ -525,7 +527,7 @@ describe('schema validation', () => {
     const { clarification: _omitted, ...withoutClarification } = interpretation
     const { fetchImpl } = mockFetch([{ body: completedResponse(withoutClarification) }])
 
-    const result = await interpret({ context, turns }, deterministic({ fetch: fetchImpl }))
+    const result = await interpret({ contextText, turns }, deterministic({ fetch: fetchImpl }))
 
     expect(result.kind).toBe('malformed')
   })
@@ -535,7 +537,7 @@ describe('schema validation', () => {
       { body: completedResponse({ ...interpretation, confidence: 'certain' }) }
     ])
 
-    const result = await interpret({ context, turns }, deterministic({ fetch: fetchImpl }))
+    const result = await interpret({ contextText, turns }, deterministic({ fetch: fetchImpl }))
 
     expect(result.kind).toBe('malformed')
   })

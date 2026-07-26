@@ -4,13 +4,7 @@
 // than a rewrite.
 
 import { describe, isRecord, readResponsesUsage, str } from './parsing.ts'
-import {
-  type CompletionArgs,
-  INTERPRETATION_SCHEMA,
-  type ParsedResponse,
-  type Provider,
-  type ProviderRequest
-} from './types.ts'
+import type { CompletionArgs, ParsedResponse, Provider, ProviderRequest } from './types.ts'
 
 export const RESPONSES_URL = 'https://api.openai.com/v1/responses'
 export const DEFAULT_MODEL = 'gpt-5.6-luna'

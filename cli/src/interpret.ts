@@ -5,7 +5,7 @@
 // branch, that logic belongs in the provider instead.
 
 import { loadApiKey } from './credentials.ts'
-import { formatSetupContext, formatWindow, INSTRUCTIONS } from './prompt.ts'
+import { formatWindow, INSTRUCTIONS } from './prompt.ts'
 import {
   type CompletionArgs,
   INTERPRETATION_SCHEMA,
@@ -18,7 +18,7 @@ import {
 } from './providers/index.ts'
 import { isRecord, str, summarizeIssues } from './providers/parsing.ts'
 import { backoff, formatMs, suggestedDelayMs } from './retry.ts'
-import { type Interpretation, interpretationSchema, type SetupContext, type Turn } from './types.ts'
+import { type Interpretation, interpretationSchema, type Turn } from './types.ts'
 
 const DEFAULT_MAX_RETRIES = 2
 const DEFAULT_BASE_DELAY_MS = 400
@@ -66,7 +66,12 @@ export type RetryInfo = {
 }
 
 export type InterpretArgs = {
-  context: SetupContext
+  /**
+   * The briefing, already resolved. Passed as text rather than a structure
+   * because it is authored — by an agent or by the user in Obsidian — and Lens
+   * has no business reformatting it.
+   */
+  contextText: string
   turns: Turn[]
   model?: string
 }
@@ -109,9 +114,9 @@ export async function interpret(
   const result = await complete(
     {
       system: INSTRUCTIONS,
-      // Setup context first so it can serve as a stable cache prefix; the
-      // transcript window changes on every call and must come last.
-      messages: [formatSetupContext(args.context), formatWindow(args.turns)],
+      // Briefing first so it can serve as a stable cache prefix; the transcript
+      // window changes on every call and must come last.
+      messages: [args.contextText, formatWindow(args.turns)],
       schema: INTERPRETATION_SCHEMA,
       schemaName: 'interpretation',
       maxOutputTokens: INTERPRET_MAX_OUTPUT_TOKENS,

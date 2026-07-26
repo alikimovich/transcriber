@@ -5,7 +5,6 @@
 // has to know a UI exists.
 
 import { Box, Text, useApp, useInput } from 'ink'
-import React from 'react'
 import type { Channel, Interpretation, Turn } from './types.ts'
 
 export interface ViewState {

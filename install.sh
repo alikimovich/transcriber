@@ -117,7 +117,7 @@ API_KEY=""
 have_key=0
 CHOSEN_BINDIR=""
 DO_MIC=0
-DO_SETUP=0
+DO_SKILL=1
 
 if [ "$interactive" -eq 1 ]; then
 	say "${bold}A few questions, then it runs unattended${reset}"
@@ -178,14 +178,15 @@ if [ "$interactive" -eq 1 ]; then
 	case "${reply:-y}" in [Nn]*) DO_MIC=0 ;; *) DO_MIC=1 ;; esac
 
 	say ""
-	printf '  Add your job description and notes now? (opens %s) [y/N] ' "${EDITOR:-vi}"
+	printf '  Install the %s/interview%s skill for Claude Code? [Y/n] ' "$bold" "$reset"
 	read -r reply || true
-	case "${reply:-n}" in [Yy]*) DO_SETUP=1 ;; *) DO_SETUP=0 ;; esac
+	case "${reply:-y}" in [Nn]*) DO_SKILL=0 ;; *) DO_SKILL=1 ;; esac
 	say ""
 else
 	# Non-interactive: take the key from the environment, accept defaults.
 	API_KEY="${XAI_API_KEY:-}"
 	CHOSEN_BINDIR="$default_bindir"
+	DO_SKILL=1
 	say "${dim}non-interactive: using defaults${reset}"
 fi
 
@@ -254,6 +255,22 @@ EOF
 	esac
 fi
 
+# The wiki that feeds the briefing. Scaffolding it here means `interview-lens`
+# works before the user has ever run the skill.
+if (cd cli && bun run src/cli.tsx context init >/dev/null 2>&1); then
+	ok "wiki at ${INTERVIEW_LENS_WIKI:-$HOME/memory/interview-lens}"
+else
+	warn "could not create the wiki — run \`interview-lens context init\` yourself"
+fi
+
+if [ "$DO_SKILL" -eq 1 ]; then
+	skill_dir="$HOME/.claude/skills"
+	mkdir -p "$skill_dir"
+	# Symlinked, not copied, so editing the repo updates the skill.
+	ln -sfn "$REPO/skill" "$skill_dir/interview"
+	ok "installed the /interview skill"
+fi
+
 if [ "$DO_MIC" -eq 1 ]; then
 	say "  requesting microphone access…"
 	./capture/ilcapture request-mic || warn "microphone not granted (you can re-run: ./capture/ilcapture request-mic)"
@@ -269,17 +286,12 @@ say "${dim}  macOS will ask for Screen & System Audio Recording — say yes.${re
 say ""
 (cd cli && bun run src/cli.tsx doctor) || true
 
-if [ "$DO_SETUP" -eq 1 ]; then
-	say ""
-	(cd cli && bun run src/cli.tsx setup) || warn "setup skipped"
-fi
-
 say ""
 say "${bold}Ready.${reset}"
 say ""
 say "  ${dim}List what is playing audio:${reset}  interview-lens doctor"
 say "  ${dim}Start a session:${reset}            interview-lens run --match zoom"
-say "  ${dim}Add job description/notes:${reset}  interview-lens setup"
+say "  ${dim}Build your context:${reset}         /interview  (in Claude Code)"
 say ""
 say "  ${dim}Wear headphones — without them the interviewer's voice reaches your"
 say "  microphone too, and lands on both channels.${reset}"

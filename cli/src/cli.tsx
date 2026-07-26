@@ -15,11 +15,19 @@ import { render } from 'ink'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 
 import { clearContext, contextPath, loadContext, saveContext } from './config.ts'
+import {
+  BRIEFING_CHAR_WARNING,
+  briefingPath,
+  listTargets,
+  resolvePromptContext,
+  wikiExists,
+  wikiRoot
+} from './context/briefing.ts'
 import { apiKeySource } from './credentials.ts'
 import { interpret } from './interpret.ts'
 import { serveStdio } from './mcp.ts'
 import { resolveProvider } from './providers/index.ts'
-import { loadSettings, type Settings } from './settings.ts'
+import { loadSettings, type Settings, saveSettings } from './settings.ts'
 import { CaptureSupervisor, type CaptureTarget } from './supervisor.ts'
 import { TranscriptStore } from './transcript.ts'
 import { Tui, type ViewState } from './tui.tsx'
@@ -188,8 +196,9 @@ function App({
       return
     }
 
+    const promptContext = await resolvePromptContext(settings.target ?? null)
     const result = await interpret(
-      { turns, context: await loadContext() },
+      { turns, contextText: promptContext.text },
       {
         signal: controller.signal,
         savedProvider: settings.provider,
@@ -325,6 +334,143 @@ async function runSetup(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// context / target
+// ---------------------------------------------------------------------------
+
+const SKILL_HINT = `Building the wiki is an agent's job, not this CLI's. In Claude Code, run:
+
+    /interview
+
+and give it your resume, a job posting, links, or a folder of notes. It reads
+them, asks you about anything ambiguous, and writes the wiki and the briefing.`
+
+async function runContext(argv: string[]): Promise<void> {
+  const out = (s: string) => process.stdout.write(`${s}\n`)
+  const [sub] = argv
+  const settings = await loadSettings()
+
+  switch (sub) {
+    case 'path':
+      out(wikiRoot())
+      return
+
+    case 'init': {
+      const { Wiki } = await import('./context/wiki.ts')
+      const wiki = new Wiki(wikiRoot())
+      const existed = await wiki.exists()
+      await wiki.scaffold()
+
+      out(`${existed ? 'checked' : 'created'} ${wikiRoot()}`)
+      if (!existed) out(`\n${SKILL_HINT}`)
+      return
+    }
+
+    case 'edit': {
+      if (!(await wikiExists())) {
+        fail(`no wiki at ${wikiRoot()} — run \`interview-lens context init\` first`)
+      }
+      const editor = process.env.VISUAL || process.env.EDITOR || 'open'
+      spawnSync(editor, [wikiRoot()], { stdio: 'inherit' })
+      return
+    }
+
+    case 'show':
+    case undefined: {
+      const context = await resolvePromptContext(settings.target ?? null)
+      switch (context.source) {
+        case 'briefing':
+          out(`briefing for "${context.target}" — ${context.characters} chars`)
+          out(`${context.path}\n`)
+          out(context.text)
+          if (context.characters > BRIEFING_CHAR_WARNING) {
+            out(
+              `\n! over ${BRIEFING_CHAR_WARNING} chars — this is sent on every keypress. Ask /interview to tighten it.`
+            )
+          }
+          return
+        case 'manual':
+          out('using the manual setup context (no briefing found)\n')
+          out(context.text)
+          out(`\n${SKILL_HINT}`)
+          return
+        case 'empty':
+          out('no context configured — interpretation will have nothing to work from.\n')
+          out(SKILL_HINT)
+          return
+      }
+      return
+    }
+
+    default:
+      fail('usage: interview-lens context [show|path|init|edit]')
+  }
+}
+
+async function runTarget(argv: string[]): Promise<void> {
+  const out = (s: string) => process.stdout.write(`${s}\n`)
+  const [sub, name] = argv
+  const settings = await loadSettings()
+
+  switch (sub) {
+    case undefined:
+    case 'list': {
+      const targets = await listTargets()
+      if (targets.length === 0) {
+        out('no targets yet.\n')
+        out(SKILL_HINT)
+        return
+      }
+      for (const slug of targets) {
+        out(`${slug === settings.target ? '*' : ' '} ${slug}`)
+      }
+      return
+    }
+
+    case 'use': {
+      if (!name) fail('usage: interview-lens target use <slug>')
+      const targets = await listTargets()
+      if (!targets.includes(name)) {
+        fail(`no target "${name}". Known: ${targets.join(', ') || '(none)'}`)
+      }
+      await saveSettings({ ...settings, target: name })
+      out(`active target: ${name}`)
+      return
+    }
+
+    case 'new': {
+      if (!name) fail('usage: interview-lens target new <slug>')
+      const slug = name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+      if (slug === '') fail(`"${name}" does not reduce to a usable slug`)
+
+      const { Wiki } = await import('./context/wiki.ts')
+      const wiki = new Wiki(wikiRoot())
+      await wiki.scaffold()
+      const relPath = `target/${slug}.md`
+      if ((await wiki.readPage(relPath)) === null) {
+        await wiki.writePage({
+          path: relPath,
+          title: name,
+          summary: `Interview target: ${name}`,
+          body: `# ${name}\n\n_Not researched yet._\n`
+        })
+        await wiki.rebuildIndex()
+      }
+      await saveSettings({ ...settings, target: slug })
+      out(`created ${relPath} and made it active\n`)
+      out(`Now ask an agent to research it:\n\n    /interview\n`)
+      out(`It will fill in ${relPath} and write ${briefingPath(slug)}`)
+      return
+    }
+
+    default:
+      fail('usage: interview-lens target [list|use <slug>|new <name>]')
+  }
+}
+
+// ---------------------------------------------------------------------------
 // doctor
 // ---------------------------------------------------------------------------
 
@@ -336,6 +482,7 @@ async function runDoctor(): Promise<void> {
     out(`  ✗ ${s}`)
   }
   const good = (s: string) => out(`  ✓ ${s}`)
+  const warn = (s: string) => out(`  ! ${s}`)
 
   out('capture helper')
   const version = spawnSync(CAPTURE_BINARY, ['list'], { encoding: 'utf8' })
@@ -365,15 +512,30 @@ async function runDoctor(): Promise<void> {
   else bad(`no ${provider.label} API key — run ./install.sh, or set ${provider.envVar}`)
 
   out('')
-  out('setup context')
-  const context = await loadContext()
-  if (context.jobDescription || context.notes) {
-    good(
-      `${context.jobDescription.length} chars of job description, ` +
-        `${context.notes.length} chars of notes`
-    )
+  out('interview context')
+  const promptContext = await resolvePromptContext(settings.target ?? null)
+  switch (promptContext.source) {
+    case 'briefing':
+      good(`briefing for "${promptContext.target}" (${promptContext.characters} chars)`)
+      if (promptContext.characters > BRIEFING_CHAR_WARNING) {
+        warn(
+          `over ${BRIEFING_CHAR_WARNING} chars — sent on every keypress; ask /interview to tighten it`
+        )
+      }
+      break
+    case 'manual':
+      warn('using the manual setup context; no briefing for the active target')
+      break
+    case 'empty':
+      bad('no context at all — run `/interview` in Claude Code, or `interview-lens setup`')
+      break
+  }
+  if (await wikiExists()) {
+    const targets = await listTargets()
+    out(`  wiki: ${wikiRoot()}`)
+    out(`  targets: ${targets.length === 0 ? '(none)' : targets.join(', ')}`)
   } else {
-    bad('no job description or notes saved — run `interview-lens setup`')
+    out(`  no wiki yet — \`interview-lens context init\` creates one at ${wikiRoot()}`)
   }
 
   out('')
@@ -438,6 +600,10 @@ async function main(): Promise<void> {
       return runSession(argv)
     case 'setup':
       return runSetup()
+    case 'context':
+      return runContext(argv)
+    case 'target':
+      return runTarget(argv)
     case 'doctor':
       return runDoctor()
     case 'mcp':
@@ -450,7 +616,9 @@ async function main(): Promise<void> {
     default:
       process.stdout.write(
         'interview-lens — interprets interview questions in real time\n\n' +
-          '  setup     edit the job description, notes and interviewer role\n' +
+          '  context   show/init/edit the interview wiki that feeds the briefing\n' +
+          '  target    list, switch or create the interview you are preparing for\n' +
+          '  setup     manual fallback: job description and notes, no wiki\n' +
           '  run       start a live session (--match zoom | --pid N | --all)\n' +
           '  doctor    check permissions, audio, models and credentials\n' +
           '  mcp       serve the transcript over MCP on stdio\n' +

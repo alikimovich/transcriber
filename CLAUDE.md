@@ -19,6 +19,12 @@ capture/     Swift CLI helper. Core Audio process tap + microphone +
              on-device SpeechAnalyzer. Emits JSONL on stdout, nothing else.
 cli/         bun + TypeScript. Transcript assembly, Ink TUI, MCP server, and
              the supervisor that owns the helper's lifecycle.
+skill/       The `/interview` Claude Code skill. Symlinked to
+             ~/.claude/skills/interview by install.sh, so editing it here takes
+             effect immediately.
+cli/src/context/
+             Reading the wiki. Lens only ever reads — the skill does all the
+             writing.
 cli/src/providers/
              One file per vendor. The prompt, the JSON Schema and the result
              type are ours; a provider supplies only the endpoint, envelope,
@@ -65,6 +71,24 @@ bun run src/cli.tsx doctor
   vendor means one file in `providers/` plus a registry entry, nothing else.
 - Comments explain *why*, not *what*. Several comments in this codebase are
   load-bearing warnings; don't delete them as noise.
+
+## Context is an agent's job, not the CLI's
+
+Lens reads exactly one file at runtime: `target/<slug>.briefing.md` in the
+user's wiki. It does not extract PDFs, fetch URLs, walk folders, summarise, or
+call a model to build context. All of that is the `/interview` skill, run by
+Claude Code or Codex.
+
+This was not the first design. An earlier cut had an in-app ingest pipeline —
+PDF extraction, HTML-to-text, an LLM pass with its own schema, a compiled-context
+cache with staleness checks. It was ~25KB of code reimplementing, worse, what
+the agent driving it already does. It got deleted. If you find yourself adding
+source extraction or a summarisation prompt to this repo, that is the signal you
+are rebuilding it.
+
+The briefing being a plain file the user can edit is the point, not an
+implementation detail: it is the one place they can correct a wrong emphasis
+before it shapes every hint of an interview.
 
 ## Invariants — do not break these
 

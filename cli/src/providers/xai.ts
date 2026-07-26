@@ -8,13 +8,7 @@
 // new features land elsewhere first, not imminent removal.
 
 import { describe, isRecord, readChatUsage, str } from './parsing.ts'
-import {
-  type CompletionArgs,
-  INTERPRETATION_SCHEMA,
-  type ParsedResponse,
-  type Provider,
-  type ProviderRequest
-} from './types.ts'
+import type { CompletionArgs, ParsedResponse, Provider, ProviderRequest } from './types.ts'
 
 export const CHAT_COMPLETIONS_URL = 'https://api.x.ai/v1/chat/completions'
 

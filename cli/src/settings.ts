@@ -13,9 +13,11 @@ const FILE_NAME = 'settings.json'
 export type Settings = {
   provider: ProviderId | null
   model: string | null
+  /** Slug of the interview being prepared for; selects which briefing is used. */
+  target: string | null
 }
 
-export const EMPTY_SETTINGS: Settings = { provider: null, model: null }
+export const EMPTY_SETTINGS: Settings = { provider: null, model: null, target: null }
 
 export function settingsPath(): string {
   return join(configDir(), FILE_NAME)
@@ -29,7 +31,8 @@ export async function loadSettings(): Promise<Settings> {
     const record = parsed as Record<string, unknown>
     return {
       provider: isProviderId(record.provider) ? record.provider : null,
-      model: typeof record.model === 'string' && record.model !== '' ? record.model : null
+      model: typeof record.model === 'string' && record.model !== '' ? record.model : null,
+      target: typeof record.target === 'string' && record.target !== '' ? record.target : null
     }
   } catch {
     return EMPTY_SETTINGS
