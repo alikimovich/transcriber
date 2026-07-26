@@ -31,8 +31,8 @@ The two halves talk over one pipe. `capture/Sources/Protocol.swift` and
 ## Commands
 
 ```sh
-sudo xcode-select -s /Applications/Xcode-26.5.0.app   # once; Xcode 26.5 is installed
-./capture/build.sh                                     # builds + signs ilcapture
+./install.sh              # full setup; safe to re-run
+./capture/build.sh        # just the helper; auto-detects a signing identity
 
 cd cli
 bun install
@@ -50,7 +50,11 @@ bun run src/cli.tsx doctor
 - **biome** for lint and format. Run `bunx biome check --write src test`.
 - Swift is built by `capture/build.sh` with plain `swiftc` — there is no
   SwiftPM manifest and no Xcode project. Adding files means adding them to
-  `Sources/`; the build globs.
+  `Sources/`; the build globs. **Command Line Tools are sufficient; full Xcode
+  is not required.**
+- The API key comes from `loadApiKey()` in `cli/src/credentials.ts`:
+  `OPENAI_API_KEY` first, then the login Keychain. Don't reintroduce a direct
+  `process.env.OPENAI_API_KEY` read.
 - Comments explain *why*, not *what*. Several comments in this codebase are
   load-bearing warnings; don't delete them as noise.
 
@@ -148,6 +152,13 @@ running the whole chain rather than the parts:
 
 `cli/test/supervisor.test.ts` drives a scripted fake helper, so this is
 testable without audio hardware. Extend that rather than testing by hand.
+
+### Anything that probes the tap must tolerate the 1-in-3 silent start
+
+`doctor` originally reported "permission missing" on a single silent probe,
+which is a false alarm a third of the time — worse than not checking. It now
+retries once before concluding anything. Any new diagnostic has the same
+obligation.
 
 ## Testing
 

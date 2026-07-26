@@ -7,7 +7,15 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-IDENTITY="${CODESIGN_IDENTITY:-Developer ID Application: Andrei Alikimovich (ZMVK3ALPSD)}"
+# TCC keys permission grants to the code signature. A Developer ID keeps them
+# across rebuilds; ad-hoc signing works but macOS re-prompts every time the
+# binary changes.
+if [ -z "${CODESIGN_IDENTITY:-}" ]; then
+	CODESIGN_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null |
+		sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)
+	: "${CODESIGN_IDENTITY:=-}"
+fi
+IDENTITY="$CODESIGN_IDENTITY"
 OUT="${1:-./ilcapture}"
 
 swiftc -O -swift-version 5 \
@@ -18,7 +26,7 @@ swiftc -O -swift-version 5 \
 	Sources/*.swift
 
 codesign --force --options runtime --entitlements entitlements.plist \
-	--sign "$IDENTITY" "$OUT"
+	--sign "$IDENTITY" "$OUT" 2>/dev/null
 
 echo "built $OUT"
 codesign -dv --verbose=2 "$OUT" 2>&1 | grep -E "Identifier|Authority=Developer"

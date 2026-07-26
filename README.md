@@ -45,20 +45,45 @@ an Electron app, which can only capture all system output.
 minutes of channel-labelled transcript and works out what was asked. Removing
 the selector removed a whole class of bugs.
 
-## Build
-
-Requires full Xcode (26.5) selected, not just Command Line Tools:
+## Install
 
 ```sh
-sudo xcode-select -s /Applications/Xcode-26.5.0.app   # once
-./capture/build.sh                                     # → capture/ilcapture
-cd cli && bun install
+git clone git@github.com:alikimovich/interview-lens.git
+cd interview-lens
+./install.sh
 ```
 
-The capture helper is signed with a Developer ID and carries an embedded
-`Info.plist`. That plist is what makes the permission grants stick: TCC keys
-them to the code signature and bundle identifier, so an unsigned or re-branded
-build gets re-prompted.
+The installer checks prerequisites, asks for everything it needs in one block,
+then builds and configures without further interruption. It's safe to re-run —
+anything already in place is detected and skipped.
+
+It will ask for:
+
+- your **OpenAI API key** (stored in the login Keychain, not a dotfile) —
+  optional; everything except interpretation works without it
+- which **signing certificate** to use, if you have more than one
+- whether to put the `interview-lens` command on your PATH
+- whether to grant **microphone** access now
+- whether to fill in your **job description and notes** now
+
+Requirements: Apple Silicon, macOS 26+, and the **Command Line Tools**
+(`xcode-select --install`, about 1GB). Full Xcode is *not* needed — the build
+calls `swiftc` directly. `bun` is installed automatically if missing.
+
+### Signing
+
+The helper carries an embedded `Info.plist` and is code-signed. That's what
+makes permission grants stick: macOS keys them to the code signature and bundle
+identifier. With a Developer ID certificate the grants survive rebuilds; with
+ad-hoc signing (the automatic fallback) macOS re-asks every time the binary
+changes. Both work.
+
+### Manual build
+
+```sh
+./capture/build.sh          # → capture/ilcapture, auto-detects a signing identity
+cd cli && bun install
+```
 
 ## Permissions to grant
 
@@ -77,12 +102,18 @@ failing it; the interviewer channel is the one carrying the questions.
 ## Run
 
 ```sh
-./capture/ilcapture list                        # what's producing audio
-./capture/ilcapture request-mic                 # once, ever
+interview-lens doctor                # permissions, audio, credentials
+interview-lens setup                 # job description, notes, interviewer role
+interview-lens run --match zoom      # live session
+interview-lens mcp                   # serve the transcript over MCP on stdio
 
 # raw capture, no UI — useful for debugging
+./capture/ilcapture list
 ./capture/ilcapture capture --system-match zoom | jq -c 'select(.type=="transcript")'
 ```
+
+In a session: **space** interprets the current question, **c** clears the
+transcript, **q** quits.
 
 ## Privacy
 
@@ -94,6 +125,9 @@ failing it; the interviewer channel is the one carrying the questions.
   `~/Library/Application Support/interview-lens/context.json`.
 - The only network call is the interpretation request to OpenAI, which sends
   transcript text and your setup context. It is sent with `store: false`.
+- The API key lives in the login Keychain, not an exported shell variable, so
+  it isn't handed to every process you start. `OPENAI_API_KEY` still overrides
+  it when set.
 - No telemetry.
 
 ## Manual smoke test

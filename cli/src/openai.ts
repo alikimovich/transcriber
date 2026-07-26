@@ -19,6 +19,7 @@
  * discriminated union instead.
  */
 
+import { loadApiKey } from './credentials.ts'
 import { type BuildRequestArgs, buildRequestBody, type ResponsesRequest } from './prompt.ts'
 import { type Interpretation, interpretationSchema } from './types.ts'
 
@@ -70,7 +71,7 @@ export type RetryInfo = {
 }
 
 export type InterpretOptions = {
-  /** Defaults to `process.env.OPENAI_API_KEY`. */
+  /** Defaults to `OPENAI_API_KEY`, then the login Keychain. */
   apiKey?: string
   model?: string
   baseUrl?: string
@@ -104,9 +105,12 @@ export async function sendInterpretRequest(
   body: ResponsesRequest,
   options: InterpretOptions = {}
 ): Promise<InterpretResult> {
-  const apiKey = options.apiKey ?? process.env.OPENAI_API_KEY
+  const apiKey = options.apiKey ?? loadApiKey()
   if (apiKey === undefined || apiKey === '') {
-    return transportError('OPENAI_API_KEY is not set', { retryable: false })
+    return transportError(
+      'no OpenAI API key: set OPENAI_API_KEY or run ./install.sh to store one in the Keychain',
+      { retryable: false }
+    )
   }
 
   const doFetch = options.fetch ?? ((input, init) => fetch(input, init))

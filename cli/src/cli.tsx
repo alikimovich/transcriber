@@ -15,6 +15,7 @@ import { render } from 'ink'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 
 import { clearContext, contextPath, loadContext, saveContext } from './config.ts'
+import { apiKeySource } from './credentials.ts'
 import { serveStdio } from './mcp.ts'
 import { interpret } from './openai.ts'
 import { CaptureSupervisor, type CaptureTarget } from './supervisor.ts'
@@ -230,9 +231,9 @@ function App({ target, useMic }: { target: CaptureTarget; useMic: boolean }) {
 async function runSession(argv: string[]): Promise<void> {
   const target = parseTarget(argv)
   const useMic = !argv.includes('--no-mic')
-  if (!process.env.OPENAI_API_KEY) {
+  if (apiKeySource() === 'none') {
     process.stderr.write(
-      'warning: OPENAI_API_KEY is not set — transcription will work, interpretation will not.\n'
+      'warning: no OpenAI API key — transcription will work, interpretation will not.\n'
     )
   }
   const { waitUntilExit } = render(React.createElement(App, { target, useMic }))
@@ -339,8 +340,10 @@ async function runDoctor(): Promise<void> {
 
   out('')
   out('credentials')
-  if (process.env.OPENAI_API_KEY) good('OPENAI_API_KEY is set')
-  else bad('OPENAI_API_KEY is not set — interpretation will fail')
+  const source = apiKeySource()
+  if (source === 'env') good('API key from OPENAI_API_KEY')
+  else if (source === 'keychain') good('API key from the login Keychain')
+  else bad('no API key — run ./install.sh, or set OPENAI_API_KEY')
 
   out('')
   out('setup context')
@@ -355,36 +358,52 @@ async function runDoctor(): Promise<void> {
   }
 
   out('')
-  out('audio capture (3s probe of all system output)')
-  await new Promise<void>((done) => {
-    const child = spawn(CAPTURE_BINARY, ['capture', '--system-all', '--no-mic', '--seconds', '3'], {
-      stdio: ['ignore', 'pipe', 'pipe']
-    })
-    let peak = 0
-    let sawStatus: string | null = null
-    child.stdout.on('data', (chunk: Buffer) => {
-      for (const line of chunk.toString().split('\n')) {
-        if (!line.trim()) continue
-        try {
-          const e = JSON.parse(line)
-          if (e.type === 'level' && e.peak > peak) peak = e.peak
-          if (e.type === 'status') sawStatus = e.code
-        } catch {
-          /* ignore partial lines */
+  out('audio capture (probing all system output)')
+
+  /** One capture attempt. Resolves with the loudest peak it saw. */
+  const probeOnce = (): Promise<{ peak: number; status: string | null }> =>
+    new Promise((done) => {
+      const child = spawn(
+        CAPTURE_BINARY,
+        ['capture', '--system-all', '--no-mic', '--seconds', '3'],
+        { stdio: ['ignore', 'pipe', 'pipe'] }
+      )
+      let peak = 0
+      let status: string | null = null
+      child.stdout.on('data', (chunk: Buffer) => {
+        for (const line of chunk.toString().split('\n')) {
+          if (!line.trim()) continue
+          try {
+            const e = JSON.parse(line)
+            if (e.type === 'level' && e.peak > peak) peak = e.peak
+            if (e.type === 'status') status = e.code
+          } catch {
+            /* partial line; readline-free parsing is fine for a one-shot probe */
+          }
         }
-      }
+      })
+      child.on('close', () => done({ peak, status }))
     })
-    child.on('close', () => {
-      if (peak > 0) good(`system audio flowing (peak ${peak.toFixed(3)})`)
-      else if (sawStatus === 'system_audio_silent')
-        bad(
-          'system audio came up silent — either nothing was playing, or the ' +
-            'Screen & System Audio Recording permission is missing'
-        )
-      else out('  – no audio detected (was anything playing?)')
-      done()
-    })
-  })
+
+  // The tap comes up silent on roughly one launch in three, and a fresh process
+  // recovers. Probing once would tell a third of users their permissions are
+  // broken when they are fine — worse than not checking at all.
+  let probe = await probeOnce()
+  if (probe.peak === 0 && probe.status === 'system_audio_silent') {
+    out('  first probe came up silent, retrying…')
+    probe = await probeOnce()
+  }
+
+  if (probe.peak > 0) {
+    good(`system audio flowing (peak ${probe.peak.toFixed(3)})`)
+  } else if (probe.status === 'system_audio_silent') {
+    bad(
+      'system audio is silent across two attempts — if something was playing, ' +
+        'grant Screen & System Audio Recording in System Settings > Privacy & Security'
+    )
+  } else {
+    out('  – no audio detected (play something and re-run to test properly)')
+  }
 
   out('')
   out(problems === 0 ? 'all good' : `${problems} problem(s) found`)
