@@ -44,6 +44,16 @@ final class SystemAudioTap {
     private var ioProcID: AudioDeviceIOProcID?
     private(set) var format: AVAudioFormat?
 
+    // The format the IOProc's buffers are actually in, which is NOT reliably
+    // what kAudioTapPropertyFormat claims — see the comment in start(). Read on
+    // the realtime IO thread, replaced from a property listener when the device
+    // changes profile mid-session, hence the lock (same pattern as LevelMeter).
+    private let wrapLock = NSLock()
+    private var wrapFormat: AVAudioFormat?
+    private var tapBufferIndex = 0
+    private var monitoredStream = AudioObjectID(kAudioObjectUnknown)
+    private var streamListener: AudioObjectPropertyListenerBlock?
+
     /// Called on Core Audio's realtime thread. Keep the work short.
     private let onBuffer: (AVAudioPCMBuffer) -> Void
 
@@ -104,24 +114,119 @@ final class SystemAudioTap {
             throw TapError.createAggregateFailed(aggStatus)
         }
 
+        // What format are the IOProc's buffers in? kAudioTapPropertyFormat
+        // describes the mixdown as the *tap* defines it — NOT necessarily the
+        // stream the *aggregate* delivers. When the output device runs a
+        // different rate or layout (AirPods drop to 24 kHz mono in hands-free
+        // profile during a call), the aggregate's input stream follows the
+        // device while the tap property keeps claiming 48 kHz stereo. Wrapping
+        // buffers with the claimed format then reads 4× too many frames per
+        // second: chipmunked, untranscribable audio that the recorder pads
+        // with rhythmic silence. Diagnosed from a real corrupted recording —
+        // trust the aggregate's own input stream, fall back to the tap claim
+        // only if the stream can't be read.
+        let tapClaim = caRead(
+            tapID, caAddress(kAudioTapPropertyFormat), AudioStreamBasicDescription.self)
+
+        let inputStreams = caReadArray(
+            aggregateID,
+            caAddress(kAudioDevicePropertyStreams, kAudioObjectPropertyScopeInput),
+            AudioObjectID.self)
+        for (i, stream) in inputStreams.enumerated() {
+            if let f = caRead(
+                stream, caAddress(kAudioStreamPropertyVirtualFormat),
+                AudioStreamBasicDescription.self)
+            {
+                note(
+                    "aggregate input stream \(i): \(Int(f.mSampleRate)) Hz, "
+                        + "\(f.mChannelsPerFrame) ch")
+            }
+        }
+        if let c = tapClaim {
+            note("tap property claims: \(Int(c.mSampleRate)) Hz, \(c.mChannelsPerFrame) ch")
+        }
+
+        // Sub-device streams come first in the aggregate, tap streams are
+        // appended — so the tap's data is the last input stream, and the last
+        // buffer in the IOProc's list.
+        tapBufferIndex = max(0, inputStreams.count - 1)
+        monitoredStream =
+            inputStreams.isEmpty ? AudioObjectID(kAudioObjectUnknown) : inputStreams[tapBufferIndex]
+
+        let streamASBD: AudioStreamBasicDescription? =
+            monitoredStream != kAudioObjectUnknown
+            ? caRead(
+                monitoredStream, caAddress(kAudioStreamPropertyVirtualFormat),
+                AudioStreamBasicDescription.self)
+            : nil
         guard
-            var asbd = caRead(
-                tapID, caAddress(kAudioTapPropertyFormat), AudioStreamBasicDescription.self),
+            var asbd = streamASBD ?? tapClaim,
             let avFormat = AVAudioFormat(streamDescription: &asbd)
         else {
             throw TapError.unsupportedFormat
         }
         format = avFormat
+        wrapFormat = avFormat
+        if let claim = tapClaim, streamASBD != nil,
+            claim.mSampleRate != asbd.mSampleRate
+                || claim.mChannelsPerFrame != asbd.mChannelsPerFrame
+        {
+            note(
+                "tap claim disagrees with the delivered stream — using the stream "
+                    + "(\(Int(asbd.mSampleRate)) Hz, \(asbd.mChannelsPerFrame) ch)")
+        }
+
+        // The device can change profile mid-session (AirPods entering
+        // hands-free when a call starts), which changes the stream format under
+        // us. Track it: downstream converters rebuild whenever a buffer's
+        // declared format changes, so updating the wrap format here is enough.
+        if monitoredStream != kAudioObjectUnknown {
+            var addr = caAddress(kAudioStreamPropertyVirtualFormat)
+            let stream = monitoredStream
+            let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+                guard let self else { return }
+                let changed = caRead(
+                    stream, caAddress(kAudioStreamPropertyVirtualFormat),
+                    AudioStreamBasicDescription.self)
+                guard var c = changed, let f = AVAudioFormat(streamDescription: &c) else { return }
+                self.wrapLock.lock()
+                self.wrapFormat = f
+                self.wrapLock.unlock()
+                note("tap stream format changed: \(Int(c.mSampleRate)) Hz, \(c.mChannelsPerFrame) ch")
+            }
+            if AudioObjectAddPropertyListenerBlock(stream, &addr, DispatchQueue.global(), listener)
+                == noErr
+            {
+                streamListener = listener
+            }
+        }
 
         let handler = onBuffer
+        let lock = wrapLock
+        let index = tapBufferIndex
         let ioStatus = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, nil) {
-            _, inInputData, _, _, _ in
-            guard
-                let buffer = AVAudioPCMBuffer(
-                    pcmFormat: avFormat,
-                    bufferListNoCopy: inInputData,
-                    deallocator: nil)
-            else { return }
+            [weak self] _, inInputData, _, _, _ in
+            lock.lock()
+            let fmt = self?.wrapFormat
+            lock.unlock()
+            guard let fmt else { return }
+
+            // Wrap only the tap's buffer: on devices with an input side (a
+            // headset microphone) the aggregate's buffer list also carries the
+            // device's own input streams, and the tap is the last entry.
+            let listPtr = UnsafeMutablePointer(mutating: inInputData)
+            let buffers = UnsafeMutableAudioBufferListPointer(listPtr)
+            let buffer: AVAudioPCMBuffer?
+            if buffers.count == 1 || index >= buffers.count || !fmt.isInterleaved {
+                // Single stream, or a layout we can't safely slice: wrap as-is.
+                buffer = AVAudioPCMBuffer(
+                    pcmFormat: fmt, bufferListNoCopy: inInputData, deallocator: nil)
+            } else {
+                var single = AudioBufferList(mNumberBuffers: 1, mBuffers: buffers[index])
+                buffer = AVAudioPCMBuffer(
+                    pcmFormat: fmt, bufferListNoCopy: &single, deallocator: nil)
+            }
+            guard let buffer else { return }
             handler(buffer)
         }
         guard ioStatus == noErr, let ioProcID else {
@@ -166,6 +271,13 @@ final class SystemAudioTap {
     }
 
     func stop() {
+        if let streamListener, monitoredStream != kAudioObjectUnknown {
+            var addr = caAddress(kAudioStreamPropertyVirtualFormat)
+            AudioObjectRemovePropertyListenerBlock(
+                monitoredStream, &addr, DispatchQueue.global(), streamListener)
+            self.streamListener = nil
+            monitoredStream = AudioObjectID(kAudioObjectUnknown)
+        }
         if let ioProcID, aggregateID != kAudioObjectUnknown {
             AudioDeviceStop(aggregateID, ioProcID)
             AudioDeviceDestroyIOProcID(aggregateID, ioProcID)

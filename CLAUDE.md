@@ -139,6 +139,20 @@ trailer is written. `SIGTERM` and wait.
   both speech models costs 0.3s. Don't go optimizing the wrong one.
 - A tapped process object goes stale when that process exits; the tap then
   yields silence. Long-lived targets (Zoom) are fine.
+- **`kAudioTapPropertyFormat` lies about the delivered stream.** It describes
+  the mixdown as the tap defines it; the IOProc's buffers are in the
+  *aggregate's input stream* format, which follows the output device. AirPods
+  drop to 24 kHz mono in hands-free profile during a call while the tap keeps
+  claiming 48 kHz stereo — wrapping buffers with the claim then reads 4× too
+  many frames per second: chipmunked audio the transcriber can't read and the
+  recorder pads into rhythmic 5–6 Hz chop (diagnosed from a real corrupted
+  recording; de-chopping and slowing 4× recovered clean speech). Read
+  `kAudioStreamPropertyVirtualFormat` from the aggregate's input streams
+  instead, wrap only the tap's buffer (the *last* input stream — a headset mic
+  adds device input streams before it), and listen for format changes: the
+  profile switch happens mid-session when a call starts. `SystemAudioTap`
+  does all three; the recorder also warns once if a channel produces real
+  samples at well under its declared rate, which is this failure's signature.
 
 ### Swift
 

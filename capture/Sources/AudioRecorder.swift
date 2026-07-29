@@ -138,6 +138,16 @@ final class AudioRecorder: @unchecked Sendable {
     private var framesWritten: Int64 = 0
     private var writeFailed = false
 
+    // A channel that supplies some samples but persistently far fewer than the
+    // wall clock demands is not silent — it is arriving slower than its declared
+    // rate, which means the declared format is wrong and the recording is
+    // garbled (rhythmically zero-stuffed, time-compressed speech). That exact
+    // failure shipped once; make it loud. A channel supplying nothing at all is
+    // fine — an absent mic is deliberately just silence on the left.
+    private var meRead: Int64 = 0
+    private var themRead: Int64 = 0
+    private var underfillWarned = false
+
     /// Opens `<path>` for writing as stereo AAC. Returns nil (after emitting a
     /// captureError status) if the file can't be created — the caller then just
     /// captures without recording rather than failing the session.
@@ -255,8 +265,25 @@ final class AudioRecorder: @unchecked Sendable {
         // Left = me (mic), right = them (system audio).
         memset(channelData[0], 0, frames * MemoryLayout<Float>.stride)
         memset(channelData[1], 0, frames * MemoryLayout<Float>.stride)
-        _ = meFIFO.read(into: channelData[0], count: frames)
-        _ = themFIFO.read(into: channelData[1], count: frames)
+        meRead += Int64(meFIFO.read(into: channelData[0], count: frames))
+        themRead += Int64(themFIFO.read(into: channelData[1], count: frames))
+
+        // After ~10s, a live-but-starved channel means a declared-rate mismatch
+        // upstream. Warn once; keep recording what there is.
+        if !underfillWarned, framesWritten > Int64(Self.sampleRate) * 10 {
+            for (name, read) in [("me", meRead), ("them", themRead)] {
+                let ratio = Double(read) / Double(framesWritten)
+                if ratio > 0.05, ratio < 0.8 {
+                    underfillWarned = true
+                    writer.emit(
+                        .status(
+                            code: .captureError,
+                            message:
+                                "the \(name) channel is producing audio at \(Int(ratio * 100))% of its declared rate — the recording will be garbled; this usually means the audio device's real format differs from what the tap reports"
+                        ))
+                }
+            }
+        }
 
         do {
             try file.write(from: stereo)
