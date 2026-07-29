@@ -108,7 +108,8 @@ function App({
       them: { rms: 0, peak: 0 }
     },
     turns: [],
-    elapsedSeconds: 0
+    elapsedSeconds: 0,
+    sessionStartedAt: startedAt / 1000
   })
 
   useEffect(() => {
