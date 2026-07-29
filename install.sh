@@ -9,15 +9,6 @@ set -euo pipefail
 cd "$(dirname "$0")"
 REPO="$(pwd)"
 
-KEYCHAIN_SERVICE="interview-lens"
-CONFIG_DIR="$HOME/Library/Application Support/interview-lens"
-
-# Keep in step with cli/src/providers/*.ts
-PROVIDER_ID="xai"
-PROVIDER_LABEL="xAI (Grok)"
-PROVIDER_ENV="XAI_API_KEY"
-PROVIDER_CONSOLE="https://console.x.ai"
-
 bold=$(tput bold 2>/dev/null || true)
 dim=$(tput dim 2>/dev/null || true)
 red=$(tput setaf 1 2>/dev/null || true)
@@ -39,7 +30,7 @@ interactive=1
 
 say ""
 say "${bold}Interview Lens${reset}"
-say "${dim}interprets interview questions in real time${reset}"
+say "${dim}records and transcribes conversations, on-device${reset}"
 say ""
 
 # ---------------------------------------------------------------------------
@@ -76,22 +67,6 @@ need_bun=0
 command -v bun >/dev/null 2>&1 || need_bun=1
 if [ "$need_bun" -eq 0 ]; then ok "bun $(bun --version)"; else warn "bun not installed"; fi
 
-# A key for either provider counts as "configured"; which one we actually use
-# is settled in the questions below.
-key_for() { # $1 = account, $2 = env var name
-	[ -n "${!2:-}" ] && return 0
-	security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$1" -w >/dev/null 2>&1
-}
-have_xai_key=0
-have_openai_key=0
-key_for xai XAI_API_KEY && have_xai_key=1
-key_for openai OPENAI_API_KEY && have_openai_key=1
-if [ "$have_xai_key" -eq 1 ]; then ok "xAI key configured"; fi
-if [ "$have_openai_key" -eq 1 ]; then ok "OpenAI key configured"; fi
-if [ "$have_xai_key" -eq 0 ] && [ "$have_openai_key" -eq 0 ]; then
-	warn "no API key configured for either provider"
-fi
-
 # TCC keys grants to the code signature. A Developer ID keeps them across
 # rebuilds; ad-hoc signing works but macOS re-prompts every time the binary
 # changes.
@@ -113,8 +88,6 @@ say ""
 # 3. Everything we need to ask, asked once
 # ---------------------------------------------------------------------------
 
-API_KEY=""
-have_key=0
 CHOSEN_BINDIR=""
 DO_MIC=0
 DO_SKILL=1
@@ -123,37 +96,7 @@ if [ "$interactive" -eq 1 ]; then
 	say "${bold}A few questions, then it runs unattended${reset}"
 	say ""
 
-	say "  ${dim}Which model interprets the questions? Transcription is on-device"
-	say "  and free either way; this only affects interpretation.${reset}"
-	say "    1) xAI — Grok 4.3          (default)"
-	say "    2) OpenAI — GPT-5.6 Luna"
-	printf '  Choice? [1] '
-	read -r reply || true
-	case "${reply:-1}" in
-	2)
-		PROVIDER_ID="openai"
-		PROVIDER_LABEL="OpenAI"
-		PROVIDER_ENV="OPENAI_API_KEY"
-		PROVIDER_CONSOLE="https://platform.openai.com/api-keys"
-		have_key=$have_openai_key
-		;;
-	*) have_key=$have_xai_key ;;
-	esac
-
-	if [ "$have_key" -eq 0 ]; then
-		say ""
-		say "  ${dim}${PROVIDER_LABEL} API key — roughly 8 cents per interview."
-		say "  Get one at ${PROVIDER_CONSOLE}; it will be stored in your Keychain."
-		say "  Leave blank to skip; everything except interpretation still works.${reset}"
-		printf '  API key: '
-		read -rs API_KEY || true
-		printf '\n'
-	else
-		ok "${PROVIDER_LABEL} key already configured"
-	fi
-
 	if [ "$identity_count" -gt 1 ]; then
-		say ""
 		say "  ${dim}Multiple Developer ID certificates found. Permission grants are tied"
 		say "  to whichever one signs the helper.${reset}"
 		i=1
@@ -165,15 +108,15 @@ if [ "$interactive" -eq 1 ]; then
 		read -r choice || true
 		choice=${choice:-1}
 		SIGN_IDENTITY=$(printf '%s' "$identities" | sed -n "${choice}p")
+		say ""
 	fi
 
-	say ""
 	printf '  Install the %sinterview-lens%s command into %s? [Y/n] ' "$bold" "$reset" "$default_bindir"
 	read -r reply || true
 	case "${reply:-y}" in [Nn]*) CHOSEN_BINDIR="" ;; *) CHOSEN_BINDIR="$default_bindir" ;; esac
 
 	say ""
-	printf '  Grant microphone access now? (needed for your side of the conversation) [Y/n] '
+	printf '  Grant microphone access now? (needed to record your side) [Y/n] '
 	read -r reply || true
 	case "${reply:-y}" in [Nn]*) DO_MIC=0 ;; *) DO_MIC=1 ;; esac
 
@@ -183,8 +126,6 @@ if [ "$interactive" -eq 1 ]; then
 	case "${reply:-y}" in [Nn]*) DO_SKILL=0 ;; *) DO_SKILL=1 ;; esac
 	say ""
 else
-	# Non-interactive: take the key from the environment, accept defaults.
-	API_KEY="${XAI_API_KEY:-}"
 	CHOSEN_BINDIR="$default_bindir"
 	DO_SKILL=1
 	say "${dim}non-interactive: using defaults${reset}"
@@ -221,23 +162,6 @@ say "  installing dependencies…"
 (cd cli && bun install --silent >/dev/null 2>&1) || die "bun install failed"
 ok "dependencies installed"
 
-if [ -n "$API_KEY" ]; then
-	# -U updates in place if the item already exists.
-	if security add-generic-password -U \
-		-s "$KEYCHAIN_SERVICE" -a "$PROVIDER_ID" -w "$API_KEY" \
-		-l "Interview Lens ($PROVIDER_LABEL)" 2>/dev/null; then
-		ok "API key stored in the login Keychain"
-	else
-		warn "could not write to the Keychain; export OPENAI_API_KEY instead"
-	fi
-fi
-
-# Persist the provider choice so every shell agrees on it.
-mkdir -p "$CONFIG_DIR"
-printf '{\n  "provider": "%s",\n  "model": null\n}\n' "$PROVIDER_ID" >"$CONFIG_DIR/settings.json"
-chmod 600 "$CONFIG_DIR/settings.json"
-ok "using $PROVIDER_LABEL"
-
 if [ -n "$CHOSEN_BINDIR" ]; then
 	mkdir -p "$CHOSEN_BINDIR"
 	launcher="$CHOSEN_BINDIR/interview-lens"
@@ -253,14 +177,6 @@ EOF
 	*":$CHOSEN_BINDIR:"*) ;;
 	*) warn "$CHOSEN_BINDIR is not on your PATH — add it to your shell profile" ;;
 	esac
-fi
-
-# The wiki that feeds the briefing. Scaffolding it here means `interview-lens`
-# works before the user has ever run the skill.
-if (cd cli && bun run src/cli.tsx context init >/dev/null 2>&1); then
-	ok "wiki at ${INTERVIEW_LENS_WIKI:-$HOME/memory/interview-lens}"
-else
-	warn "could not create the wiki — run \`interview-lens context init\` yourself"
 fi
 
 if [ "$DO_SKILL" -eq 1 ]; then
@@ -289,10 +205,11 @@ say ""
 say ""
 say "${bold}Ready.${reset}"
 say ""
-say "  ${dim}List what is playing audio:${reset}  interview-lens doctor"
-say "  ${dim}Start a session:${reset}            interview-lens run --match zoom"
-say "  ${dim}Build your context:${reset}         /interview  (in Claude Code)"
+say "  ${dim}See what is playing audio:${reset}  interview-lens doctor"
+say "  ${dim}Record a call:${reset}             interview-lens record --match zoom"
+say "  ${dim}Record everything:${reset}         interview-lens record --all"
 say ""
-say "  ${dim}Wear headphones — without them the interviewer's voice reaches your"
-say "  microphone too, and lands on both channels.${reset}"
+say "  ${dim}Recordings land in ~/memory/conversations. Wear headphones — without"
+say "  them the other side's voice reaches your microphone and lands on both"
+say "  channels.${reset}"
 say ""

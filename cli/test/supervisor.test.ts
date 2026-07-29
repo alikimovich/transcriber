@@ -49,11 +49,38 @@ function collect(supervisor: CaptureSupervisor) {
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/** Poll until `path` exists, or throw after `timeoutMs`. Avoids racing a fixed
+ * sleep against bash spawn latency, which is unbounded under a loaded runner. */
+async function waitForFile(path: string, timeoutMs = 4000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (await Bun.file(path).exists()) return
+    await wait(25)
+  }
+  throw new Error(`timed out waiting for ${path}`)
+}
+
+/** Poll `pred` until it is truthy, or give up after `timeoutMs`. Lets a test
+ * wait for the condition it actually cares about instead of guessing how long a
+ * multi-step spawn/restart sequence takes — which drifts badly when Bun runs
+ * test files concurrently and starves these real-time sleeps. */
+async function waitUntil(
+  pred: () => boolean | Promise<boolean>,
+  timeoutMs = 8000
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (await pred()) return true
+    await wait(25)
+  }
+  return false
+}
+
 describe('CaptureSupervisor', () => {
   test('parses JSONL and forwards events', async () => {
     const binaryPath = fakeHelper(
-      `echo '{"type":"ready","t":1,"sampleRate":48000,"channels":["interviewer"],"locale":"en-US"}'\n` +
-        `echo '{"type":"level","t":2,"channel":"interviewer","rms":0.1,"peak":0.5}'\n` +
+      `echo '{"type":"ready","t":1,"sampleRate":48000,"channels":["them"],"locale":"en-US"}'\n` +
+        `echo '{"type":"level","t":2,"channel":"them","rms":0.1,"peak":0.5}'\n` +
         `sleep 5\n`
     )
     const supervisor = new CaptureSupervisor({ binaryPath, target: { kind: 'all' } })
@@ -69,7 +96,7 @@ describe('CaptureSupervisor', () => {
     const binaryPath = fakeHelper(
       `echo ''\n` +
         `echo 'not json at all'\n` +
-        `echo '{"type":"level","t":2,"channel":"interviewer","rms":0,"peak":0.9}'\n` +
+        `echo '{"type":"level","t":2,"channel":"them","rms":0,"peak":0.9}'\n` +
         `sleep 5\n`
     )
     const supervisor = new CaptureSupervisor({ binaryPath, target: { kind: 'all' } })
@@ -89,7 +116,7 @@ describe('CaptureSupervisor', () => {
         `  echo '{"type":"status","t":1,"code":"system_audio_silent","message":"silent"}'\n` +
         `  sleep 0.2; exit 0\n` +
         `fi\n` +
-        `echo '{"type":"level","t":2,"channel":"interviewer","rms":0.2,"peak":0.7}'\n` +
+        `echo '{"type":"level","t":2,"channel":"them","rms":0.2,"peak":0.7}'\n` +
         `sleep 5\n`
     )
     const supervisor = new CaptureSupervisor({ binaryPath, target: { kind: 'all' } })
@@ -113,15 +140,21 @@ describe('CaptureSupervisor', () => {
         `  sleep 10 & wait\n` +
         `fi\n` +
         `echo "$(date +%s%N) second-start" >> "${join(dir, 'order')}"\n` +
-        `echo '{"type":"level","t":2,"channel":"interviewer","rms":0.2,"peak":0.7}'\n` +
+        `echo '{"type":"level","t":2,"channel":"them","rms":0.2,"peak":0.7}'\n` +
         `sleep 5\n`
     )
     const supervisor = new CaptureSupervisor({ binaryPath, target: { kind: 'all' } })
     collect(supervisor)
     supervisor.start()
-    await wait(2500)
+    // Both lines land only after the outgoing helper exits and the replacement
+    // starts — the exact ordering under test. Wait for that, don't guess a delay.
+    const settled = await waitUntil(async () => {
+      const file = Bun.file(join(dir, 'order'))
+      if (!(await file.exists())) return false
+      return (await file.text()).trim().split('\n').filter(Boolean).length >= 2
+    })
     supervisor.stop()
-    await wait(200)
+    expect(settled).toBe(true)
 
     const order = (await Bun.file(join(dir, 'order')).text()).trim().split('\n')
     expect(order).toHaveLength(2)
@@ -135,21 +168,50 @@ describe('CaptureSupervisor', () => {
     const binaryPath = fakeHelper(
       `if [ "$n" -eq 1 ]; then\n` +
         `  echo '{"type":"status","t":1,"code":"system_audio_silent","message":"silent"}'\n` +
-        `  trap 'echo "{\\"type\\":\\"ready\\",\\"t\\":9,\\"sampleRate\\":48000,\\"channels\\":[\\"interviewer\\"],\\"locale\\":\\"stale\\"}"; exit 0' TERM\n` +
+        `  trap 'echo "{\\"type\\":\\"ready\\",\\"t\\":9,\\"sampleRate\\":48000,\\"channels\\":[\\"them\\"],\\"locale\\":\\"stale\\"}"; exit 0' TERM\n` +
         `  sleep 10 & wait\n` +
         `fi\n` +
-        `echo '{"type":"ready","t":2,"sampleRate":48000,"channels":["interviewer"],"locale":"fresh"}'\n` +
+        `echo '{"type":"ready","t":2,"sampleRate":48000,"channels":["them"],"locale":"fresh"}'\n` +
         `sleep 5\n`
     )
     const supervisor = new CaptureSupervisor({ binaryPath, target: { kind: 'all' } })
     const { events } = collect(supervisor)
     supervisor.start()
-    await wait(2000)
+    // Wait for the replacement's fresh `ready`, then give a leaked stale one a
+    // beat to also surface — so "exactly one ready" is a real assertion, not a
+    // race that happens to observe the fresh one before the stale one arrives.
+    await waitUntil(() => events.some((e) => e.type === 'ready' && e.locale === 'fresh'))
+    await wait(300)
     supervisor.stop()
 
     const readies = events.filter((e) => e.type === 'ready')
     expect(readies).toHaveLength(1)
     expect(readies[0]).toMatchObject({ locale: 'fresh' })
+  })
+
+  test('passes --record through to the helper only when a record path is set', async () => {
+    // The fake helper records the argv it was launched with, so we can assert
+    // the flag reaches the Swift side exactly as the wire contract requires.
+    const argsFile = join(dir, 'args')
+    const binaryPath = fakeHelper(`printf '%s\\n' "$@" > "${argsFile}"\nsleep 5\n`)
+
+    const withoutRecord = new CaptureSupervisor({ binaryPath, target: { kind: 'all' } })
+    withoutRecord.start()
+    await waitForFile(argsFile)
+    withoutRecord.stop()
+    expect(await Bun.file(argsFile).text()).not.toContain('--record')
+
+    rmSync(argsFile, { force: true })
+    const recordPath = join(dir, 'audio.m4a')
+    const withRecord = new CaptureSupervisor({ binaryPath, target: { kind: 'all' }, recordPath })
+    withRecord.start()
+    await waitForFile(argsFile)
+    withRecord.stop()
+
+    const args = (await Bun.file(argsFile).text()).trim().split('\n')
+    const recordIndex = args.indexOf('--record')
+    expect(recordIndex).toBeGreaterThanOrEqual(0)
+    expect(args[recordIndex + 1]).toBe(recordPath)
   })
 
   test('gives up after the configured number of silent relaunches', async () => {

@@ -87,8 +87,8 @@ export type TranscriptStoreOptions = {
    * it. A genuine finalized result for the same span replaces it later, because
    * finalized segments are keyed by `start`.
    *
-   * Defaults to true: losing a question the interviewer actually asked is worse
-   * than the small risk of duplication if the analyzer re-segments an utterance.
+   * Defaults to true: losing something a speaker actually said is worse than the
+   * small risk of duplication if the analyzer re-segments an utterance.
    */
   keepAbandonedVolatiles?: boolean
 }
@@ -112,8 +112,8 @@ export class TranscriptStore {
   constructor(options: TranscriptStoreOptions = {}) {
     this.keepAbandonedVolatiles = options.keepAbandonedVolatiles ?? true
     this.slots = {
-      interviewer: emptySlot(),
-      candidate: emptySlot()
+      me: emptySlot(),
+      them: emptySlot()
     }
   }
 
@@ -175,10 +175,10 @@ export class TranscriptStore {
   }
 
   /** The full transcript per channel, for display. */
-  render(): { interviewer: string; candidate: string } {
+  render(): { me: string; them: string } {
     return {
-      interviewer: this.renderChannel('interviewer'),
-      candidate: this.renderChannel('candidate')
+      me: this.renderChannel('me'),
+      them: this.renderChannel('them')
     }
   }
 

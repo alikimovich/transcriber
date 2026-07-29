@@ -1,8 +1,8 @@
 // System-output capture via a Core Audio process tap.
 //
 // The tap can be scoped to specific processes, which is the whole reason this
-// is native: the interviewer channel can be limited to the meeting app so
-// music and notification sounds never reach the transcript.
+// is native: the system-audio (them) channel can be limited to the meeting app
+// so music and notification sounds never reach the transcript.
 //
 // Two things here are load-bearing and non-obvious (see SPIKE.md):
 //   - the aggregate device must be anchored to a real output device for its

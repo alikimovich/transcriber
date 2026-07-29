@@ -1,11 +1,12 @@
-// Live terminal UI.
+// Live terminal UI for a recording session.
 //
 // Presentational only — it takes plain data and renders. Wiring lives in
-// index.ts so this stays trivially testable and so the transcript store never
-// has to know a UI exists.
+// cli.tsx so this stays trivially testable and so the transcript store never has
+// to know a UI exists. There is no interpretation layer any more: this just
+// shows what is being captured and transcribed as it happens.
 
 import { Box, Text, useApp, useInput } from 'ink'
-import type { Channel, Interpretation, Turn } from './types.ts'
+import type { Channel, Turn } from './types.ts'
 
 export interface ViewState {
   target: string
@@ -15,27 +16,23 @@ export interface ViewState {
   /** Most recent status message, if any, with its severity. */
   notice?: { text: string; severity: 'info' | 'warn' }
   turns: Turn[]
-  hint?: Interpretation
-  hintPending: boolean
-  hintError?: string
   elapsedSeconds: number
 }
 
 export interface TuiProps {
   state: ViewState
-  onInterpret: () => void
   onClear: () => void
   onQuit: () => void
 }
 
 const CHANNEL_LABEL: Record<Channel, string> = {
-  interviewer: 'THEM',
-  candidate: 'YOU '
+  me: 'ME  ',
+  them: 'THEM'
 }
 
 const CHANNEL_COLOR: Record<Channel, string> = {
-  interviewer: 'cyan',
-  candidate: 'gray'
+  me: 'gray',
+  them: 'cyan'
 }
 
 function meter(peak: number, width = 12): string {
@@ -53,8 +50,8 @@ function StatusBar({ state }: { state: ViewState }) {
   return (
     <Box justifyContent="space-between">
       <Box gap={2}>
-        <Text color={state.ready ? 'green' : 'yellow'}>
-          {state.ready ? '● live' : '○ starting'}
+        <Text color={state.ready ? 'red' : 'yellow'}>
+          {state.ready ? '● recording' : '○ starting'}
         </Text>
         <Text dimColor>{state.target}</Text>
         <Text dimColor>{clock(state.elapsedSeconds)}</Text>
@@ -70,60 +67,10 @@ function StatusBar({ state }: { state: ViewState }) {
   )
 }
 
-function HintPanel({ state }: { state: ViewState }) {
-  if (state.hintPending) {
-    return (
-      <Box borderStyle="round" borderColor="yellow" paddingX={1}>
-        <Text color="yellow">reading the room…</Text>
-      </Box>
-    )
-  }
-  if (state.hintError) {
-    return (
-      <Box borderStyle="round" borderColor="red" paddingX={1}>
-        <Text color="red">{state.hintError}</Text>
-      </Box>
-    )
-  }
-  if (!state.hint) return null
-
-  const { intent, emphasis, clarification, confidence } = state.hint
-  const confidenceColor =
-    confidence === 'high' ? 'green' : confidence === 'medium' ? 'yellow' : 'red'
-
-  return (
-    <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={1}>
-      <Box>
-        <Text color="magenta" bold>
-          Likely testing{'  '}
-        </Text>
-        <Text>{intent}</Text>
-      </Box>
-      <Box>
-        <Text color="magenta" bold>
-          Emphasize{'     '}
-        </Text>
-        <Text>{emphasis}</Text>
-      </Box>
-      {clarification ? (
-        <Box>
-          <Text color="magenta" bold>
-            Clarify{'       '}
-          </Text>
-          <Text italic>"{clarification}"</Text>
-        </Box>
-      ) : null}
-      <Text color={confidenceColor} dimColor>
-        confidence: {confidence}
-      </Text>
-    </Box>
-  )
-}
-
 /** Ink repaints its whole block each frame, so only render a viewport. */
-const VISIBLE_TURNS = 8
+const VISIBLE_TURNS = 12
 
-export function Tui({ state, onInterpret, onClear, onQuit }: TuiProps) {
+export function Tui({ state, onClear, onQuit }: TuiProps) {
   const { exit } = useApp()
 
   useInput((input, key) => {
@@ -132,7 +79,6 @@ export function Tui({ state, onInterpret, onClear, onQuit }: TuiProps) {
       exit()
       return
     }
-    if (input === ' ' || input === 'i') onInterpret()
     if (input === 'c') onClear()
   })
 
@@ -165,9 +111,7 @@ export function Tui({ state, onInterpret, onClear, onQuit }: TuiProps) {
         )}
       </Box>
 
-      <HintPanel state={state} />
-
-      <Text dimColor>space interpret · c clear · q quit</Text>
+      <Text dimColor>c clear · q save & quit</Text>
     </Box>
   )
 }

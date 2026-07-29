@@ -1,10 +1,10 @@
 // On-device transcription, one independent analyzer per channel.
 //
 // Speaker identity comes from the audio source, not from diarization: whatever
-// arrives on the system-audio tap is the interviewer, whatever arrives on the
-// microphone is the candidate. That is far more reliable than asking a model to
-// tell voices apart — but it does assume headphones, or the interviewer's voice
-// leaks from the speakers into the microphone and lands on both channels.
+// arrives on the system-audio tap is them, whatever arrives on the microphone
+// is me. That is far more reliable than asking a model to tell voices apart —
+// but it does assume headphones, or their voice leaks from the speakers into
+// the microphone and lands on both channels.
 
 import AVFoundation
 import Foundation

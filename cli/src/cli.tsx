@@ -1,36 +1,19 @@
 #!/usr/bin/env bun
 // interview-lens — entry point.
 //
-//   setup    edit the saved job description / notes / interviewer role
-//   run      live session with the terminal UI
-//   doctor   check permissions, audio levels, models and credentials
-//   mcp      expose the transcript over MCP on stdio
-//   clear    forget the saved setup context
+//   record   listen to mic + system audio, transcribe on-device, save a session
+//   doctor   check the capture helper, audio, and the conversation store
 
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import { render } from 'ink'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 
-import { clearContext, contextPath, loadContext, saveContext } from './config.ts'
-import {
-  BRIEFING_CHAR_WARNING,
-  briefingPath,
-  listTargets,
-  resolvePromptContext,
-  wikiExists,
-  wikiRoot
-} from './context/briefing.ts'
-import { apiKeySource } from './credentials.ts'
-import { interpret } from './interpret.ts'
-import { serveStdio } from './mcp.ts'
-import { resolveProvider } from './providers/index.ts'
-import { loadSettings, type Settings, saveSettings } from './settings.ts'
+import { ConversationStore, conversationsRoot } from './store.ts'
 import { CaptureSupervisor, type CaptureTarget } from './supervisor.ts'
 import { TranscriptStore } from './transcript.ts'
 import { Tui, type ViewState } from './tui.tsx'
+import type { Channel } from './types.ts'
 
 const CAPTURE_BINARY = resolve(import.meta.dirname, '../../capture/ilcapture')
 
@@ -39,11 +22,16 @@ function fail(message: string): never {
   process.exit(1)
 }
 
+function flagValue(argv: string[], flag: string): string | undefined {
+  const i = argv.indexOf(flag)
+  if (i !== -1 && argv[i + 1]) return argv[i + 1]
+  return undefined
+}
+
 function parseTarget(argv: string[]): CaptureTarget {
-  const matchIndex = argv.indexOf('--match')
-  if (matchIndex !== -1 && argv[matchIndex + 1]) {
-    return { kind: 'match', text: argv[matchIndex + 1] as string }
-  }
+  const match = flagValue(argv, '--match')
+  if (match !== undefined) return { kind: 'match', text: match }
+
   const pids = argv
     .flatMap((a, i) => (a === '--pid' ? [argv[i + 1]] : []))
     .filter((v): v is string => Boolean(v))
@@ -61,6 +49,7 @@ function parseTarget(argv: string[]): CaptureTarget {
   )
 }
 
+/** The "listening to …" line shown in the live view. */
 function describeTarget(target: CaptureTarget): string {
   switch (target.kind) {
     case 'match':
@@ -72,44 +61,57 @@ function describeTarget(target: CaptureTarget): string {
   }
 }
 
+/** The short capture-source label persisted to the transcript and meta.json. */
+function describeSource(target: CaptureTarget): string {
+  switch (target.kind) {
+    case 'match':
+      return target.text
+    case 'process':
+      return `pid ${target.pids.join(', ')}`
+    case 'all':
+      return 'all system audio'
+  }
+}
+
 // ---------------------------------------------------------------------------
-// run
+// record
 // ---------------------------------------------------------------------------
 
 function App({
   target,
   useMic,
-  settings
+  recordPath,
+  store,
+  startedAt
 }: {
   target: CaptureTarget
   useMic: boolean
-  settings: Settings
+  recordPath: string
+  store: TranscriptStore
+  startedAt: number
 }) {
-  const storeRef = useRef(new TranscriptStore())
   const supervisorRef = useRef<CaptureSupervisor | null>(null)
-  const startedAt = useRef(Date.now())
-  const inFlight = useRef<AbortController | null>(null)
 
   const [, forceRender] = useState(0)
+  const initialChannels: Channel[] = useMic ? ['me', 'them'] : ['them']
   const [state, setState] = useState<ViewState>({
     target: describeTarget(target),
     ready: false,
-    channels: ['interviewer'],
+    channels: initialChannels,
     levels: {
-      interviewer: { rms: 0, peak: 0 },
-      candidate: { rms: 0, peak: 0 }
+      me: { rms: 0, peak: 0 },
+      them: { rms: 0, peak: 0 }
     },
     turns: [],
-    hintPending: false,
     elapsedSeconds: 0
   })
 
   useEffect(() => {
-    const store = storeRef.current
     const supervisor = new CaptureSupervisor({
       binaryPath: CAPTURE_BINARY,
       target,
-      useMic
+      useMic,
+      recordPath
     })
     supervisorRef.current = supervisor
 
@@ -163,7 +165,7 @@ function App({
     const ticker = setInterval(() => {
       setState((prev) => ({
         ...prev,
-        elapsedSeconds: (Date.now() - startedAt.current) / 1000
+        elapsedSeconds: (Date.now() - startedAt) / 1000
       }))
       forceRender((n) => n + 1)
     }, 1000)
@@ -172,302 +174,56 @@ function App({
       clearInterval(ticker)
       supervisor.stop()
     }
-  }, [target, useMic])
-
-  const onInterpret = useCallback(async () => {
-    // A newer question supersedes an older one still in flight.
-    inFlight.current?.abort()
-    const controller = new AbortController()
-    inFlight.current = controller
-
-    setState((prev) => ({
-      ...prev,
-      hintPending: true,
-      hintError: undefined
-    }))
-
-    const turns = storeRef.current.window(300)
-    if (turns.length === 0) {
-      setState((prev) => ({
-        ...prev,
-        hintPending: false,
-        hintError: 'nothing transcribed yet'
-      }))
-      return
-    }
-
-    const promptContext = await resolvePromptContext(settings.target ?? null)
-    const result = await interpret(
-      { turns, contextText: promptContext.text },
-      {
-        signal: controller.signal,
-        savedProvider: settings.provider,
-        model: settings.model ?? undefined
-      }
-    )
-    if (controller.signal.aborted) return
-
-    setState((prev) => {
-      if (result.kind === 'ok') {
-        return {
-          ...prev,
-          hintPending: false,
-          hint: result.interpretation,
-          hintError: undefined
-        }
-      }
-      const message =
-        result.kind === 'refusal'
-          ? 'the model declined to interpret that'
-          : result.kind === 'incomplete'
-            ? `response cut off (${result.reason})`
-            : result.kind === 'malformed'
-              ? 'the model returned something unusable'
-              : result.message
-      return { ...prev, hintPending: false, hintError: message }
-    })
-  }, [])
+  }, [target, useMic, recordPath, store, startedAt])
 
   const onClear = useCallback(() => {
-    storeRef.current.clear()
+    store.clear()
     setState((prev) => ({
       ...prev,
       turns: [],
-      hint: undefined,
-      hintError: undefined,
       notice: { text: 'transcript cleared', severity: 'info' }
     }))
-  }, [])
+  }, [store])
 
   const onQuit = useCallback(() => {
     supervisorRef.current?.stop()
   }, [])
 
-  return React.createElement(Tui, {
-    state,
-    onInterpret,
-    onClear,
-    onQuit
-  })
+  return React.createElement(Tui, { state, onClear, onQuit })
 }
 
-async function runSession(argv: string[]): Promise<void> {
+async function runRecord(argv: string[]): Promise<void> {
   const target = parseTarget(argv)
   const useMic = !argv.includes('--no-mic')
-  const settings = await loadSettings()
-  const provider = resolveProvider(null, settings.provider)
-  if (apiKeySource(provider) === 'none') {
-    process.stderr.write(
-      `warning: no ${provider.label} API key — transcription will work, interpretation will not.\n`
-    )
-  }
-  const { waitUntilExit } = render(React.createElement(App, { target, useMic, settings }))
+  const title = flagValue(argv, '--title')
+
+  const conversations = new ConversationStore()
+  const session = await conversations.createSession(title ? { title } : {})
+  const store = new TranscriptStore()
+
+  const { waitUntilExit } = render(
+    React.createElement(App, {
+      target,
+      useMic,
+      recordPath: session.audioPath,
+      store,
+      startedAt: session.startedAt.getTime()
+    })
+  )
   await waitUntilExit()
-}
 
-// ---------------------------------------------------------------------------
-// setup
-// ---------------------------------------------------------------------------
+  // `store.session` reflects what the helper actually delivered; fall back to
+  // the requested channels if it never got as far as a `ready`.
+  const channels: Channel[] = store.session?.channels ?? (useMic ? ['me', 'them'] : ['them'])
+  await conversations.finalize(session, {
+    turns: store.window(Number.POSITIVE_INFINITY),
+    endedAt: new Date(),
+    source: describeSource(target),
+    channels,
+    sampleRate: store.session?.sampleRate ?? null
+  })
 
-const SETUP_TEMPLATE = `# Lines starting with # are ignored.
-# Everything under each heading is used as-is.
-
-## Job description
-
-{{JOB}}
-
-## Notes
-
-{{NOTES}}
-
-## Interviewer role
-
-{{ROLE}}
-`
-
-function parseSetupFile(text: string): {
-  jobDescription: string
-  notes: string
-  interviewerRole?: string
-} {
-  const sections: Record<string, string[]> = {}
-  let current = ''
-  for (const line of text.split('\n')) {
-    const heading = line.match(/^##\s+(.+?)\s*$/)
-    if (heading) {
-      current = (heading[1] as string).toLowerCase()
-      sections[current] = []
-      continue
-    }
-    if (line.startsWith('#')) continue
-    if (current) sections[current]?.push(line)
-  }
-  const get = (key: string) => (sections[key] ?? []).join('\n').trim()
-  const role = get('interviewer role')
-  return {
-    jobDescription: get('job description'),
-    notes: get('notes'),
-    ...(role ? { interviewerRole: role } : {})
-  }
-}
-
-async function runSetup(): Promise<void> {
-  const existing = await loadContext()
-  const body = SETUP_TEMPLATE.replace('{{JOB}}', existing.jobDescription)
-    .replace('{{NOTES}}', existing.notes)
-    .replace('{{ROLE}}', existing.interviewerRole ?? '')
-
-  const dir = mkdtempSync(join(tmpdir(), 'interview-lens-'))
-  const file = join(dir, 'context.md')
-  writeFileSync(file, body, 'utf8')
-
-  const editor = process.env.VISUAL || process.env.EDITOR || 'vi'
-  const result = spawnSync(editor, [file], { stdio: 'inherit' })
-  if (result.status !== 0) fail('editor exited without saving; nothing changed')
-
-  const context = parseSetupFile(readFileSync(file, 'utf8'))
-  if (!context.jobDescription && !context.notes) {
-    fail('both the job description and notes were empty; nothing saved')
-  }
-  await saveContext(context)
-  process.stdout.write(`saved to ${contextPath()}\n`)
-}
-
-// ---------------------------------------------------------------------------
-// context / target
-// ---------------------------------------------------------------------------
-
-const SKILL_HINT = `Building the wiki is an agent's job, not this CLI's. In Claude Code, run:
-
-    /interview
-
-and give it your resume, a job posting, links, or a folder of notes. It reads
-them, asks you about anything ambiguous, and writes the wiki and the briefing.`
-
-async function runContext(argv: string[]): Promise<void> {
-  const out = (s: string) => process.stdout.write(`${s}\n`)
-  const [sub] = argv
-  const settings = await loadSettings()
-
-  switch (sub) {
-    case 'path':
-      out(wikiRoot())
-      return
-
-    case 'init': {
-      const { Wiki } = await import('./context/wiki.ts')
-      const wiki = new Wiki(wikiRoot())
-      const existed = await wiki.exists()
-      await wiki.scaffold()
-
-      out(`${existed ? 'checked' : 'created'} ${wikiRoot()}`)
-      if (!existed) out(`\n${SKILL_HINT}`)
-      return
-    }
-
-    case 'edit': {
-      if (!(await wikiExists())) {
-        fail(`no wiki at ${wikiRoot()} — run \`interview-lens context init\` first`)
-      }
-      const editor = process.env.VISUAL || process.env.EDITOR || 'open'
-      spawnSync(editor, [wikiRoot()], { stdio: 'inherit' })
-      return
-    }
-
-    case 'show':
-    case undefined: {
-      const context = await resolvePromptContext(settings.target ?? null)
-      switch (context.source) {
-        case 'briefing':
-          out(`briefing for "${context.target}" — ${context.characters} chars`)
-          out(`${context.path}\n`)
-          out(context.text)
-          if (context.characters > BRIEFING_CHAR_WARNING) {
-            out(
-              `\n! over ${BRIEFING_CHAR_WARNING} chars — this is sent on every keypress. Ask /interview to tighten it.`
-            )
-          }
-          return
-        case 'manual':
-          out('using the manual setup context (no briefing found)\n')
-          out(context.text)
-          out(`\n${SKILL_HINT}`)
-          return
-        case 'empty':
-          out('no context configured — interpretation will have nothing to work from.\n')
-          out(SKILL_HINT)
-          return
-      }
-      return
-    }
-
-    default:
-      fail('usage: interview-lens context [show|path|init|edit]')
-  }
-}
-
-async function runTarget(argv: string[]): Promise<void> {
-  const out = (s: string) => process.stdout.write(`${s}\n`)
-  const [sub, name] = argv
-  const settings = await loadSettings()
-
-  switch (sub) {
-    case undefined:
-    case 'list': {
-      const targets = await listTargets()
-      if (targets.length === 0) {
-        out('no targets yet.\n')
-        out(SKILL_HINT)
-        return
-      }
-      for (const slug of targets) {
-        out(`${slug === settings.target ? '*' : ' '} ${slug}`)
-      }
-      return
-    }
-
-    case 'use': {
-      if (!name) fail('usage: interview-lens target use <slug>')
-      const targets = await listTargets()
-      if (!targets.includes(name)) {
-        fail(`no target "${name}". Known: ${targets.join(', ') || '(none)'}`)
-      }
-      await saveSettings({ ...settings, target: name })
-      out(`active target: ${name}`)
-      return
-    }
-
-    case 'new': {
-      if (!name) fail('usage: interview-lens target new <slug>')
-      const slug = name
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-      if (slug === '') fail(`"${name}" does not reduce to a usable slug`)
-
-      const { Wiki } = await import('./context/wiki.ts')
-      const wiki = new Wiki(wikiRoot())
-      await wiki.scaffold()
-      const relPath = `target/${slug}.md`
-      if ((await wiki.readPage(relPath)) === null) {
-        await wiki.writePage({
-          path: relPath,
-          title: name,
-          summary: `Interview target: ${name}`,
-          body: `# ${name}\n\n_Not researched yet._\n`
-        })
-        await wiki.rebuildIndex()
-      }
-      await saveSettings({ ...settings, target: slug })
-      out(`created ${relPath} and made it active\n`)
-      out(`Now ask an agent to research it:\n\n    /interview\n`)
-      out(`It will fill in ${relPath} and write ${briefingPath(slug)}`)
-      return
-    }
-
-    default:
-      fail('usage: interview-lens target [list|use <slug>|new <name>]')
-  }
+  process.stdout.write(`saved ${session.dir}\n`)
 }
 
 // ---------------------------------------------------------------------------
@@ -482,7 +238,6 @@ async function runDoctor(): Promise<void> {
     out(`  ✗ ${s}`)
   }
   const good = (s: string) => out(`  ✓ ${s}`)
-  const warn = (s: string) => out(`  ! ${s}`)
 
   out('capture helper')
   const version = spawnSync(CAPTURE_BINARY, ['list'], { encoding: 'utf8' })
@@ -502,40 +257,12 @@ async function runDoctor(): Promise<void> {
   }
 
   out('')
-  out('credentials')
-  const settings = await loadSettings()
-  const provider = resolveProvider(null, settings.provider)
-  out(`  using ${provider.label} · ${settings.model ?? provider.defaultModel}`)
-  const source = apiKeySource(provider)
-  if (source === 'env') good(`API key from ${provider.envVar}`)
-  else if (source === 'keychain') good('API key from the login Keychain')
-  else bad(`no ${provider.label} API key — run ./install.sh, or set ${provider.envVar}`)
-
-  out('')
-  out('interview context')
-  const promptContext = await resolvePromptContext(settings.target ?? null)
-  switch (promptContext.source) {
-    case 'briefing':
-      good(`briefing for "${promptContext.target}" (${promptContext.characters} chars)`)
-      if (promptContext.characters > BRIEFING_CHAR_WARNING) {
-        warn(
-          `over ${BRIEFING_CHAR_WARNING} chars — sent on every keypress; ask /interview to tighten it`
-        )
-      }
-      break
-    case 'manual':
-      warn('using the manual setup context; no briefing for the active target')
-      break
-    case 'empty':
-      bad('no context at all — run `/interview` in Claude Code, or `interview-lens setup`')
-      break
-  }
-  if (await wikiExists()) {
-    const targets = await listTargets()
-    out(`  wiki: ${wikiRoot()}`)
-    out(`  targets: ${targets.length === 0 ? '(none)' : targets.join(', ')}`)
-  } else {
-    out(`  no wiki yet — \`interview-lens context init\` creates one at ${wikiRoot()}`)
+  out('conversation store')
+  try {
+    const root = await new ConversationStore().ensureRoot()
+    good(`writable at ${root}`)
+  } catch (error) {
+    bad(`cannot write to ${conversationsRoot()} — ${(error as Error).message}`)
   }
 
   out('')
@@ -596,33 +323,18 @@ async function runDoctor(): Promise<void> {
 async function main(): Promise<void> {
   const [command, ...argv] = process.argv.slice(2)
   switch (command) {
-    case 'run':
-      return runSession(argv)
-    case 'setup':
-      return runSetup()
-    case 'context':
-      return runContext(argv)
-    case 'target':
-      return runTarget(argv)
+    case 'record':
+      return runRecord(argv)
     case 'doctor':
       return runDoctor()
-    case 'mcp':
-      // stdout is the JSON-RPC channel from here on.
-      return serveStdio({ transcript: new TranscriptStore() })
-    case 'clear':
-      await clearContext()
-      process.stdout.write('setup context cleared\n')
-      return
     default:
       process.stdout.write(
-        'interview-lens — interprets interview questions in real time\n\n' +
-          '  context   show/init/edit the interview wiki that feeds the briefing\n' +
-          '  target    list, switch or create the interview you are preparing for\n' +
-          '  setup     manual fallback: job description and notes, no wiki\n' +
-          '  run       start a live session (--match zoom | --pid N | --all)\n' +
-          '  doctor    check permissions, audio, models and credentials\n' +
-          '  mcp       serve the transcript over MCP on stdio\n' +
-          '  clear     forget the saved setup context\n'
+        'interview-lens — record a conversation and save it as a transcript\n\n' +
+          '  record    listen and save a session (--match zoom | --pid N | --all)\n' +
+          '              --no-mic        system audio only, skip the microphone\n' +
+          '              --title "text"  name the session (used in the folder + transcript)\n' +
+          '  doctor    check the capture helper, audio, and the conversation store\n\n' +
+          `Sessions are saved under ${conversationsRoot()}\n`
       )
       process.exit(command ? 64 : 0)
   }

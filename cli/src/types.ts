@@ -1,6 +1,6 @@
 /**
- * Wire types for the `ilcapture` helper plus the shapes the interpretation layer
- * produces. Mirrors `capture/Sources/Protocol.swift` — keep the two in sync.
+ * Wire types for the `ilcapture` helper. Mirrors `capture/Sources/Protocol.swift`
+ * — keep the two in sync.
  *
  * The helper writes one JSON object per line on stdout. Every event carries `t`,
  * a wall-clock epoch time in seconds (a float) stamped at emit time.
@@ -8,10 +8,10 @@
 
 import { z } from 'zod'
 
-/** `interviewer` is system audio; `candidate` is the microphone. */
-export type Channel = 'interviewer' | 'candidate'
+/** `me` is the microphone; `them` is system audio. */
+export type Channel = 'me' | 'them'
 
-export const CHANNELS: readonly Channel[] = ['interviewer', 'candidate']
+export const CHANNELS: readonly Channel[] = ['me', 'them']
 
 export type StatusCode =
   | 'mic_permission_denied'
@@ -86,31 +86,11 @@ export type Turn = {
   isFinal: boolean
 }
 
-/** What the model is asked to produce for the candidate. */
-export type Interpretation = {
-  intent: string
-  emphasis: string
-  /**
-   * A question to ask the interviewer back, or `null` when none is warranted.
-   * Nullable rather than optional: the Responses API's strict structured output
-   * requires every property to be present.
-   */
-  clarification: string | null
-  confidence: 'low' | 'medium' | 'high'
-}
-
-/** The only state Interview Lens persists to disk. */
-export type SetupContext = {
-  jobDescription: string
-  notes: string
-  interviewerRole?: string
-}
-
 // ---------------------------------------------------------------------------
 // Runtime validation
 // ---------------------------------------------------------------------------
 
-export const channelSchema = z.enum(['interviewer', 'candidate'])
+export const channelSchema = z.enum(['me', 'them'])
 
 export const statusCodeSchema = z.enum([
   'mic_permission_denied',
@@ -163,20 +143,6 @@ export const captureEventSchema = z.discriminatedUnion('type', [
   })
 ]) satisfies z.ZodType<CaptureEvent>
 
-export const interpretationSchema = z.object({
-  intent: z.string(),
-  emphasis: z.string(),
-  // `.nullable()` and not `.nullish()`: an absent key is a schema violation.
-  clarification: z.string().nullable(),
-  confidence: z.enum(['low', 'medium', 'high'])
-}) satisfies z.ZodType<Interpretation>
-
-export const setupContextSchema = z.object({
-  jobDescription: z.string(),
-  notes: z.string(),
-  interviewerRole: z.string().optional()
-}) satisfies z.ZodType<SetupContext>
-
 /**
  * Parse one JSONL line from the helper. Returns `null` for blank lines, invalid
  * JSON, and events that do not match the protocol — a malformed line should
@@ -203,11 +169,11 @@ export function parseEvent(line: string): CaptureEvent | null {
 export function statusChannel(code: StatusCode): Channel | null {
   switch (code) {
     case 'mic_permission_denied':
-      return 'candidate'
+      return 'me'
     case 'system_audio_silent':
     case 'system_audio_dead':
     case 'target_process_gone':
-      return 'interviewer'
+      return 'them'
     case 'model_downloading':
     case 'model_unavailable':
     case 'capture_error':

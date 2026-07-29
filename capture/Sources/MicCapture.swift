@@ -1,7 +1,7 @@
-// Microphone capture — the candidate channel.
+// Microphone capture — the me channel.
 //
-// Note on channel separation: without headphones the interviewer's voice leaks
-// from the speakers into this microphone, so the same question lands on both
+// Note on channel separation: without headphones the other participant's voice
+// leaks from the speakers into this microphone, so the same speech lands on both
 // channels. The CLI warns about this; the honest fix is headphones.
 
 import AVFoundation

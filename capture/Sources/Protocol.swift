@@ -6,10 +6,10 @@
 import Foundation
 
 enum Channel: String, Codable {
-    /// System audio — the interviewer and any other remote participants.
-    case interviewer
-    /// Microphone — the candidate.
-    case candidate
+    /// Microphone — me.
+    case me
+    /// System audio — them (the meeting and any other remote participants).
+    case them
 }
 
 /// Events emitted on stdout, one JSON object per line.

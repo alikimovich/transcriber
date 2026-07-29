@@ -1,18 +1,13 @@
 import { describe, expect, test } from 'bun:test'
-import {
-  type Interpretation,
-  interpretationSchema,
-  parseEvent,
-  statusChannel
-} from '../src/types.ts'
+import { parseEvent, statusChannel } from '../src/types.ts'
 import { T0 } from './helpers.ts'
 
 describe('parseEvent', () => {
   test('parses every event the helper emits', () => {
     const lines = [
-      `{"type":"ready","t":${T0},"sampleRate":48000,"channels":["interviewer","candidate"],"locale":"en-US"}`,
-      `{"type":"transcript","t":${T0},"channel":"interviewer","text":"hi","start":0,"end":4.02,"isFinal":true}`,
-      `{"type":"level","t":${T0},"channel":"candidate","rms":0.1,"peak":0.6}`,
+      `{"type":"ready","t":${T0},"sampleRate":48000,"channels":["them","me"],"locale":"en-US"}`,
+      `{"type":"transcript","t":${T0},"channel":"them","text":"hi","start":0,"end":4.02,"isFinal":true}`,
+      `{"type":"level","t":${T0},"channel":"me","rms":0.1,"peak":0.6}`,
       `{"type":"status","t":${T0},"code":"system_audio_silent","message":"no audio"}`,
       `{"type":"stopped","t":${T0},"reason":"signal"}`
     ]
@@ -36,12 +31,12 @@ describe('parseEvent', () => {
   })
 
   test('ignores unknown fields so a newer helper stays readable', () => {
-    const line = `{"type":"level","t":${T0},"channel":"candidate","rms":0.1,"peak":0.6,"clipping":true}`
+    const line = `{"type":"level","t":${T0},"channel":"me","rms":0.1,"peak":0.6,"clipping":true}`
 
     expect(parseEvent(line)).toEqual({
       type: 'level',
       t: T0,
-      channel: 'candidate',
+      channel: 'me',
       rms: 0.1,
       peak: 0.6
     })
@@ -60,12 +55,12 @@ describe('parseEvent', () => {
     ).toBeNull()
     // Missing required field.
     expect(
-      parseEvent(`{"type":"transcript","t":${T0},"channel":"candidate","text":"hi","start":0}`)
+      parseEvent(`{"type":"transcript","t":${T0},"channel":"me","text":"hi","start":0}`)
     ).toBeNull()
     // Wrong type for a field.
     expect(
       parseEvent(
-        `{"type":"transcript","t":${T0},"channel":"candidate","text":"hi","start":0,"end":1,"isFinal":"yes"}`
+        `{"type":"transcript","t":${T0},"channel":"me","text":"hi","start":0,"end":1,"isFinal":"yes"}`
       )
     ).toBeNull()
   })
@@ -73,55 +68,12 @@ describe('parseEvent', () => {
 
 describe('statusChannel', () => {
   test('maps codes to the channel they describe', () => {
-    expect(statusChannel('mic_permission_denied')).toBe('candidate')
-    expect(statusChannel('system_audio_silent')).toBe('interviewer')
-    expect(statusChannel('system_audio_dead')).toBe('interviewer')
-    expect(statusChannel('target_process_gone')).toBe('interviewer')
+    expect(statusChannel('mic_permission_denied')).toBe('me')
+    expect(statusChannel('system_audio_silent')).toBe('them')
+    expect(statusChannel('system_audio_dead')).toBe('them')
+    expect(statusChannel('target_process_gone')).toBe('them')
     expect(statusChannel('model_downloading')).toBeNull()
     expect(statusChannel('model_unavailable')).toBeNull()
     expect(statusChannel('capture_error')).toBeNull()
-  })
-})
-
-describe('interpretationSchema', () => {
-  const valid: Interpretation = {
-    intent: 'Probing for ownership of a system under real constraints',
-    emphasis: 'Scope you personally held and the trade-off you chose',
-    clarification: null,
-    confidence: 'medium'
-  } as const
-
-  test('accepts a valid interpretation', () => {
-    const result = interpretationSchema.safeParse(valid)
-    expect(result.success).toBe(true)
-    expect(result.data).toEqual(valid)
-  })
-
-  test('accepts a string clarification', () => {
-    const result = interpretationSchema.safeParse({ ...valid, clarification: 'Which system?' })
-    expect(result.success).toBe(true)
-  })
-
-  test('rejects a missing field', () => {
-    const { emphasis: _omitted, ...withoutEmphasis } = valid
-    expect(interpretationSchema.safeParse(withoutEmphasis).success).toBe(false)
-  })
-
-  test('rejects a confidence value outside the enum', () => {
-    expect(interpretationSchema.safeParse({ ...valid, confidence: 'very high' }).success).toBe(
-      false
-    )
-    expect(interpretationSchema.safeParse({ ...valid, confidence: 'HIGH' }).success).toBe(false)
-    expect(interpretationSchema.safeParse({ ...valid, confidence: null }).success).toBe(false)
-  })
-
-  test('rejects an absent clarification even though null is allowed', () => {
-    const { clarification: _omitted, ...withoutClarification } = valid
-    expect(interpretationSchema.safeParse(withoutClarification).success).toBe(false)
-    expect(interpretationSchema.safeParse({ ...valid, clarification: null }).success).toBe(true)
-  })
-
-  test('rejects a wrong type in place of a string', () => {
-    expect(interpretationSchema.safeParse({ ...valid, intent: 42 }).success).toBe(false)
   })
 })

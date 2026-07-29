@@ -1,8 +1,9 @@
 // ilcapture — the capture helper for Interview Lens.
 //
-// Taps system audio (the interviewer) and the microphone (the candidate),
-// transcribes both on-device, and writes one JSON object per line to stdout.
-// It has no UI and no network access; the CLI drives it.
+// Taps system audio (them) and the microphone (me), transcribes both
+// on-device, optionally records both to one stereo AAC file, and writes one
+// JSON object per line to stdout. It has no UI and no network access; the CLI
+// drives it.
 
 import AVFoundation
 import Foundation
@@ -18,6 +19,7 @@ struct Options {
     var useMic = true
     var seconds: Double?
     var locale = "en-US"
+    var recordPath: String?
 }
 
 func parseOptions(_ args: [String]) -> Options {
@@ -41,6 +43,9 @@ func parseOptions(_ args: [String]) -> Options {
         case "--locale":
             i += 1
             if i < args.count { o.locale = args[i] }
+        case "--record":
+            i += 1
+            if i < args.count { o.recordPath = args[i] }
         default:
             note("unknown option: \(args[i])")
         }
@@ -69,6 +74,8 @@ func usage() -> Never {
               --no-mic               skip the microphone channel
               --seconds <n>          stop after n seconds
               --locale <id>          transcription locale (default en-US)
+              --record <path>        also write a stereo AAC .m4a to <path>
+                                     (left = me / mic, right = them / system)
 
         Exactly one of --system-pid / --system-match / --system-all is required.
         """)
@@ -123,14 +130,14 @@ func resolveTapTargets(_ o: Options) -> [AudioObjectID] {
 func runCapture(_ o: Options) async -> Never {
     let targets = resolveTapTargets(o)
 
-    let interviewerMeter = LevelMeter()
-    let candidateMeter = LevelMeter()
+    let themMeter = LevelMeter()
+    let meMeter = LevelMeter()
 
     // Decide the channel set before building the transcriber: each channel
     // pipeline is expensive to construct, so don't build one we won't feed.
     let micAccess = o.useMic ? MicCapture.currentAccess() : .denied
-    var wantedChannels: [Channel] = [.interviewer]
-    if micAccess == .granted { wantedChannels.append(.candidate) }
+    var wantedChannels: [Channel] = [.them]
+    if micAccess == .granted { wantedChannels.append(.me) }
 
     let startedAt = Date()
     let transcriber = try? await DualTranscriber(
@@ -145,16 +152,23 @@ func runCapture(_ o: Options) async -> Never {
     }
     note(String(format: "transcriber ready in %.1fs", Date().timeIntervalSince(startedAt)))
 
-    // System audio → interviewer channel.
+    // Optional stereo recording (left = me / mic, right = them / system). A
+    // failed open reports a status and leaves `recorder` nil, so capture
+    // continues without recording rather than failing the session.
+    let recorder = o.recordPath.flatMap { AudioRecorder(path: $0, writer: writer) }
+
+    // System audio → them channel. Fan the same buffers out to the meter, the
+    // transcriber, and (if recording) the right channel of the file.
     let tap = SystemAudioTap { buffer in
-        interviewerMeter.accumulate(buffer)
-        transcriber?.feed(buffer, into: .interviewer)
+        themMeter.accumulate(buffer)
+        transcriber?.feed(buffer, into: .them)
+        recorder?.feed(buffer, into: .them)
     }
     var systemAudioLive = false
     let tapStartedAt = Date()
     do {
         systemAudioLive = try await tap.startVerified(
-            processObjectIDs: targets, meter: interviewerMeter)
+            processObjectIDs: targets, meter: themMeter)
     } catch {
         writer.emit(.status(code: .captureError, message: String(describing: error)))
         exit(3)
@@ -170,16 +184,17 @@ func runCapture(_ o: Options) async -> Never {
             ))
     }
 
-    // Microphone → candidate channel. A missing microphone degrades the
-    // session to interviewer-only rather than failing it: the interviewer
-    // channel is the one that carries the questions.
+    // Microphone → me channel. A missing microphone degrades the session to
+    // them-only rather than failing it: the system (them) channel is the one
+    // that carries the questions.
     var mic: MicCapture?
     var micLive = false
     switch micAccess {
     case .granted:
         let m = MicCapture { buffer in
-            candidateMeter.accumulate(buffer)
-            transcriber?.feed(buffer, into: .candidate)
+            meMeter.accumulate(buffer)
+            transcriber?.feed(buffer, into: .me)
+            recorder?.feed(buffer, into: .me)
         }
         do {
             try m.start()
@@ -192,13 +207,13 @@ func runCapture(_ o: Options) async -> Never {
         writer.emit(
             .status(
                 code: .micPermissionDenied,
-                message: "microphone access denied; continuing with the interviewer channel only"))
+                message: "microphone access denied; continuing with the them channel only"))
     case .notDetermined:
         writer.emit(
             .status(
                 code: .micPermissionDenied,
                 message:
-                    "microphone access not yet granted; run `ilcapture request-mic` once, then restart. Continuing with the interviewer channel only"
+                    "microphone access not yet granted; run `ilcapture request-mic` once, then restart. Continuing with the them channel only"
             ))
     default:
         break
@@ -207,7 +222,7 @@ func runCapture(_ o: Options) async -> Never {
     writer.emit(
         .ready(
             sampleRate: tap.format?.sampleRate ?? 0,
-            channels: micLive ? [.interviewer, .candidate] : [.interviewer],
+            channels: micLive ? [.them, .me] : [.them],
             locale: o.locale))
 
     // Clean shutdown on SIGINT/SIGTERM so the tap and aggregate device are
@@ -228,16 +243,16 @@ func runCapture(_ o: Options) async -> Never {
         if let deadline, Date() >= deadline { break }
         try? await Task.sleep(for: .milliseconds(500))
 
-        let interviewer = interviewerMeter.drain()
-        let candidate = candidateMeter.drain()
-        writer.emit(.level(channel: .interviewer, rms: interviewer.rms, peak: interviewer.peak))
+        let them = themMeter.drain()
+        let me = meMeter.drain()
+        writer.emit(.level(channel: .them, rms: them.rms, peak: them.peak))
         if micLive {
-            writer.emit(.level(channel: .candidate, rms: candidate.rms, peak: candidate.peak))
+            writer.emit(.level(channel: .me, rms: me.rms, peak: me.peak))
         }
 
         // Report a silent system-audio stream once — callbacks arriving with
         // nothing but zeroes is what a missing permission looks like.
-        if interviewer.isSilent, !reportedSilence {
+        if them.isSilent, !reportedSilence {
             reportedSilence = true
             writer.emit(
                 .status(
@@ -253,6 +268,9 @@ func runCapture(_ o: Options) async -> Never {
     note(String(format: "transcriber finish took %.1fs", Date().timeIntervalSince(teardownAt)))
     mic?.stop()
     tap.stop()
+    // Flush and close the recording after the callbacks have stopped, so no
+    // more samples arrive during the final drain. Bounded and quick.
+    recorder?.finish()
     writer.emit(.stopped(reason: stopping.isSet ? "signal" : "duration"))
     exit(0)
 }

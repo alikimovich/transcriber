@@ -1,7 +1,7 @@
 /**
  * Public surface of the Interview Lens core.
  *
- * A consumer — the TUI, the MCP server — should need nothing beyond this:
+ * A consumer assembles capture events into turns and saves them as a session:
  *
  * ```ts
  * const store = new TranscriptStore()
@@ -9,15 +9,19 @@
  *   const event = parseEvent(line)
  *   if (event !== null) store.applyEvent(event)
  * }
- * const result = await interpret({ context: await loadContext(), turns: store.window(60) })
+ * const conversations = new ConversationStore()
+ * const session = await conversations.createSession({ title: 'Standup' })
+ * // …capture into `session.audioPath`…
+ * await conversations.finalize(session, {
+ *   turns: store.window(Number.POSITIVE_INFINITY),
+ *   endedAt: new Date(),
+ *   source: 'all system audio',
+ *   channels: ['me', 'them'],
+ *   sampleRate: store.session?.sampleRate ?? null
+ * })
  * ```
  */
 
-export * from './config.ts'
-export * from './interpret.ts'
-export * from './prompt.ts'
-export * from './providers/index.ts'
-export * from './retry.ts'
-export * from './settings.ts'
+export * from './store.ts'
 export * from './transcript.ts'
 export * from './types.ts'

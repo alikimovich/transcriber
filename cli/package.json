@@ -1,7 +1,7 @@
 {
   "name": "interview-lens",
   "version": "0.1.0",
-  "description": "Transcript assembly and question interpretation for Interview Lens",
+  "description": "On-device conversation logger: capture, transcribe, and archive meetings",
   "type": "module",
   "private": true,
   "module": "src/index.ts",
@@ -17,10 +17,8 @@
     "start": "bun run src/cli.tsx"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
     "ink": "^7.1.1",
     "react": "^19.2.8",
-    "unpdf": "^1.8.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

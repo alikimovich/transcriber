@@ -21,6 +21,13 @@ export interface SupervisorOptions {
   target: CaptureTarget
   useMic?: boolean
   locale?: string
+  /**
+   * When set, the helper writes the captured audio to this path as a stereo AAC
+   * `.m4a` (me=left, them=right). On a silent-tap restart the same path is
+   * reused: the helper truncates it, and the outgoing helper has fully exited
+   * before the replacement spawns (see `replaceHelper`), so there is no overlap.
+   */
+  recordPath?: string
   /** How many times to relaunch after a silent start before giving up. */
   maxSilentRestarts?: number
 }
@@ -78,7 +85,8 @@ export class CaptureSupervisor extends EventEmitter {
       'capture',
       ...targetArgs(this.options.target),
       ...(this.options.useMic === false ? ['--no-mic'] : []),
-      ...(this.options.locale ? ['--locale', this.options.locale] : [])
+      ...(this.options.locale ? ['--locale', this.options.locale] : []),
+      ...(this.options.recordPath ? ['--record', this.options.recordPath] : [])
     ]
 
     const child = spawn(this.binaryPath, args, {

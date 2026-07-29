@@ -67,7 +67,7 @@ export function volatile(
   return transcript(channel, text, start, end, false, options)
 }
 
-export function ready(at = T0, channels: Channel[] = ['interviewer', 'candidate']): ReadyEvent {
+export function ready(at = T0, channels: Channel[] = ['them', 'me']): ReadyEvent {
   return { type: 'ready', t: at, sampleRate: 48000, channels, locale: 'en-US' }
 }
 
