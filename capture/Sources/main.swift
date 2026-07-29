@@ -238,6 +238,9 @@ func runCapture(_ o: Options) async -> Never {
 
     let deadline = o.seconds.map { Date().addingTimeInterval($0) }
     var reportedSilence = !systemAudioLive
+    let loopStart = Date()
+    var micPeakEver = 0.0
+    var reportedMicSilence = false
 
     while !stopping.isSet {
         if let deadline, Date() >= deadline { break }
@@ -248,6 +251,25 @@ func runCapture(_ o: Options) async -> Never {
         writer.emit(.level(channel: .them, rms: them.rms, peak: them.peak))
         if micLive {
             writer.emit(.level(channel: .me, rms: me.rms, peak: me.peak))
+            micPeakEver = max(micPeakEver, me.peak)
+
+            // A granted, running microphone delivering pure zeros for this long
+            // is a real failure, not a quiet room — a quiet room still has a
+            // noise floor. Usual culprits: the default input is a device with
+            // no actual mic, or macOS attributed the mic permission to the
+            // terminal app that launched us and that app lacks the grant. This
+            // shipped once as a session with me at exactly 0.000 throughout.
+            if micPeakEver == 0, !reportedMicSilence,
+                Date().timeIntervalSince(loopStart) > 8
+            {
+                reportedMicSilence = true
+                writer.emit(
+                    .status(
+                        code: .captureError,
+                        message:
+                            "the microphone is running but delivering pure silence — check which input device is selected in System Settings > Sound, and that your terminal app has microphone access in Privacy & Security > Microphone"
+                    ))
+            }
         }
 
         // Report a silent system-audio stream once — callbacks arriving with

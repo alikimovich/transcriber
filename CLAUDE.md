@@ -166,11 +166,29 @@ trailer is written. `SIGTERM` and wait.
   profile switch happens mid-session when a call starts. `SystemAudioTap`
   does all three; the recorder also warns once if a channel produces real
   samples at well under its declared rate, which is this failure's signature.
+- **The aggregate stream's virtual format can lie too.** A session shipped
+  where stream and tap both claimed 48 kHz stereo while the IOProc delivered
+  roughly a third of that. The only thing that cannot lie is the callbacks:
+  frames delivered ÷ host time elapsed *is* the rate. `SystemAudioTap`
+  measures it (pause-aware — a tap stops calling back while its target is
+  silent, and dead time must not read as a slow stream) and rewraps at the
+  measured rate when the declared one is >12% off. The first ~2 s of a
+  mismatched stream stay garbled while the window fills; that is the accepted
+  cost. Look for "measured delivery rate" in a session's log.txt.
 
 ### Swift
 
 - `Int(-Double.infinity)` **traps**. A dB meter hitting silence crashed the
   process before it could report silence. Clamp before converting.
+- **`AVAudioEngine.inputNode` invents a format when there is no input
+  device.** `outputFormat(forBus:)` reports a plausible 44.1 kHz stereo even
+  with no usable hardware behind it, and `installTap` with that format raises
+  an uncatchable NSException that kills the helper. `inputFormat(forBus:)`
+  honestly reports 0 Hz in that state — check it before tapping, and tap at
+  the hardware format. A granted, running mic can also deliver pure zeros
+  (virtual input device, TCC granted to the wrong terminal app); the main
+  loop reports that as a status after 8 s rather than recording silence
+  unremarked.
 - `finalizeAndFinishThroughEndOfInput()` hangs forever unless the input
   stream's continuation is finished first. Teardown is time-capped for this
   reason.

@@ -65,13 +65,38 @@ final class MicCapture {
         }
 
         let input = engine.inputNode
-        // Passing the node's own format avoids a format mismatch crash when the
-        // default input device changes (AirPods connecting mid-session, etc.).
-        let nodeFormat = input.outputFormat(forBus: 0)
-        format = nodeFormat
+
+        // Tap at the *hardware* input format, and refuse to tap at all when
+        // there is no real hardware behind the node. With no usable input
+        // device, `outputFormat(forBus:)` still reports a plausible-looking
+        // 44.1 kHz format — and installing a tap with it raises an
+        // uncatchable NSException ("format mismatch") that kills the whole
+        // helper. `inputFormat(forBus:)` reports 0 Hz in that state, which is
+        // detectable. Found by running with a mic-less default input.
+        let hwFormat = input.inputFormat(forBus: 0)
+        guard hwFormat.sampleRate > 0, hwFormat.channelCount > 0 else {
+            throw MicError.engineFailed(
+                "no usable input device (hardware reports \(Int(hwFormat.sampleRate)) Hz)")
+        }
+        format = hwFormat
+
+        // Name the device in the diagnostics: a mic that is "granted" and
+        // "running" can still deliver pure zeros when the default input is a
+        // virtual device, a mic-less display, or a Bluetooth headset whose
+        // input side never engaged. The device name is the first clue.
+        if let deviceID = caRead(
+            AudioObjectID(kAudioObjectSystemObject),
+            caAddress(kAudioHardwarePropertyDefaultInputDevice),
+            AudioObjectID.self)
+        {
+            let name = caReadString(deviceID, kAudioObjectPropertyName) ?? "unknown"
+            note(
+                "microphone: \(name), \(Int(hwFormat.sampleRate)) Hz, "
+                    + "\(hwFormat.channelCount) ch")
+        }
 
         let handler = onBuffer
-        input.installTap(onBus: 0, bufferSize: 4096, format: nodeFormat) { buffer, _ in
+        input.installTap(onBus: 0, bufferSize: 4096, format: hwFormat) { buffer, _ in
             handler(buffer)
         }
 

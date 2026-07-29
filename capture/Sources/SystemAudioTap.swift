@@ -54,6 +54,32 @@ final class SystemAudioTap {
     private var monitoredStream = AudioObjectID(kAudioObjectUnknown)
     private var streamListener: AudioObjectPropertyListenerBlock?
 
+    // Empirical delivery-rate measurement, all guarded by wrapLock.
+    //
+    // On some machines no format property tells the truth: a session shipped
+    // where the aggregate stream *and* the tap both claimed 48 kHz stereo while
+    // the IOProc delivered roughly a third of that — garbling the audio beyond
+    // what any transcriber could read. The one thing that cannot lie is the
+    // callbacks themselves: frames delivered divided by host time elapsed IS
+    // the rate, whatever the properties say. So measure it, and when it
+    // disagrees with the declared rate, rewrap with the measured one. This is
+    // self-correcting for channel-count lies too, because frames are counted
+    // exactly as the wrap format defines them.
+    private var measureStart: UInt64 = 0
+    private var measureLast: UInt64 = 0
+    private var measureFrames = 0
+    private var measurementNoted = false
+
+    private static let timebase: mach_timebase_info_data_t = {
+        var info = mach_timebase_info_data_t()
+        mach_timebase_info(&info)
+        return info
+    }()
+
+    private static func hostSeconds(_ delta: UInt64) -> Double {
+        Double(delta) * Double(timebase.numer) / Double(timebase.denom) / 1_000_000_000
+    }
+
     /// Called on Core Audio's realtime thread. Keep the work short.
     private let onBuffer: (AVAudioPCMBuffer) -> Void
 
@@ -191,8 +217,21 @@ final class SystemAudioTap {
                 guard var c = changed, let f = AVAudioFormat(streamDescription: &c) else { return }
                 self.wrapLock.lock()
                 self.wrapFormat = f
+                // The declared rate changed under us: restart the empirical
+                // measurement so a fresh lie is re-detected quickly.
+                self.measureStart = 0
+                self.measureLast = 0
+                self.measureFrames = 0
+                self.measurementNoted = false
                 self.wrapLock.unlock()
-                note("tap stream format changed: \(Int(c.mSampleRate)) Hz, \(c.mChannelsPerFrame) ch")
+                // Log every field: a "change" to seemingly identical values has
+                // been observed, meaning the difference was in a field the log
+                // did not print.
+                note(
+                    "tap stream format changed: \(Int(c.mSampleRate)) Hz, "
+                        + "\(c.mChannelsPerFrame) ch, \(c.mBytesPerFrame) B/frame, "
+                        + "id \(fourCC(OSStatus(bitPattern: c.mFormatID))), "
+                        + "flags 0x\(String(c.mFormatFlags, radix: 16))")
             }
             if AudioObjectAddPropertyListenerBlock(stream, &addr, DispatchQueue.global(), listener)
                 == noErr
@@ -202,13 +241,13 @@ final class SystemAudioTap {
         }
 
         let handler = onBuffer
-        let lock = wrapLock
         let index = tapBufferIndex
         let ioStatus = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, nil) {
             [weak self] _, inInputData, _, _, _ in
-            lock.lock()
-            let fmt = self?.wrapFormat
-            lock.unlock()
+            guard let self else { return }
+            self.wrapLock.lock()
+            let fmt = self.wrapFormat
+            self.wrapLock.unlock()
             guard let fmt else { return }
 
             // Wrap only the tap's buffer: on devices with an input side (a
@@ -227,6 +266,7 @@ final class SystemAudioTap {
                     pcmFormat: fmt, bufferListNoCopy: &single, deallocator: nil)
             }
             guard let buffer else { return }
+            self.measureDeliveryRate(frames: Int(buffer.frameLength), declared: fmt)
             handler(buffer)
         }
         guard ioStatus == noErr, let ioProcID else {
@@ -268,6 +308,62 @@ final class SystemAudioTap {
         try start(processObjectIDs: processObjectIDs)
         try? await Task.sleep(for: settle)
         return meter.drain().peak > 0
+    }
+
+    /// Called from the realtime IO thread, once per callback. Accumulates a
+    /// frames-per-host-second measurement and rewraps at the measured rate when
+    /// the declared rate is off by more than ~12%.
+    ///
+    /// Pauses are excluded: a tap stops delivering callbacks while its target is
+    /// silent, and counting that dead time would misread a quiet stream as a
+    /// slow one. Any gap over 250 ms restarts the window, so only continuous
+    /// delivery is measured. The first ~2 s of a mismatched stream stay garbled
+    /// until the window fills; everything after is correct.
+    private func measureDeliveryRate(frames: Int, declared: AVAudioFormat) {
+        let now = mach_absolute_time()
+        wrapLock.lock()
+        defer { wrapLock.unlock() }
+
+        if measureLast != 0, Self.hostSeconds(now &- measureLast) > 0.25 {
+            // Delivery paused: restart the window rather than averaging over it.
+            measureStart = now
+            measureFrames = 0
+        } else if measureStart == 0 {
+            measureStart = now
+        }
+        measureLast = now
+        measureFrames += frames
+
+        let span = Self.hostSeconds(now &- measureStart)
+        guard span >= 1.5 else { return }
+        let measured = Double(measureFrames) / span
+        measureStart = now
+        measureFrames = 0
+
+        let declaredRate = declared.sampleRate
+        if !measurementNoted {
+            measurementNoted = true
+            DispatchQueue.global().async {
+                note(
+                    "measured delivery rate: \(Int(measured)) frames/s "
+                        + "(declared \(Int(declaredRate)) Hz)")
+            }
+        }
+        guard abs(measured - declaredRate) / declaredRate > 0.12 else { return }
+
+        // Rebuild the wrap format at the measured rate. Kept in as-declared
+        // frame units, so this also compensates a wrong channel count: the
+        // timeline comes out right either way, at worst with a mild lowpass
+        // from adjacent samples being averaged in the downmix.
+        var asbd = declared.streamDescription.pointee
+        asbd.mSampleRate = (measured / 25).rounded() * 25
+        guard let corrected = AVAudioFormat(streamDescription: &asbd) else { return }
+        wrapFormat = corrected
+        DispatchQueue.global().async {
+            note(
+                "declared rate is off — rewrapping at the measured "
+                    + "\(Int(asbd.mSampleRate)) Hz (was \(Int(declaredRate)) Hz)")
+        }
     }
 
     func stop() {
