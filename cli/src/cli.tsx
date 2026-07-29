@@ -9,11 +9,11 @@ import { resolve } from 'node:path'
 import { render } from 'ink'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 
-import { ConversationStore, conversationsRoot } from './store.ts'
+import { ConversationStore, conversationsRoot, SessionLog } from './store.ts'
 import { CaptureSupervisor, type CaptureTarget } from './supervisor.ts'
 import { TranscriptStore } from './transcript.ts'
 import { Tui, type ViewState } from './tui.tsx'
-import type { Channel } from './types.ts'
+import type { CaptureEvent, Channel } from './types.ts'
 
 const CAPTURE_BINARY = resolve(import.meta.dirname, '../../capture/ilcapture')
 
@@ -82,15 +82,20 @@ function App({
   useMic,
   recordPath,
   store,
-  startedAt
+  startedAt,
+  log
 }: {
   target: CaptureTarget
   useMic: boolean
   recordPath: string
   store: TranscriptStore
   startedAt: number
+  log: SessionLog
 }) {
   const supervisorRef = useRef<CaptureSupervisor | null>(null)
+  // Peak level per channel since the last log summary, so the log carries a
+  // coarse signal-over-time trace without a line per level event.
+  const peakSinceLog = useRef<Record<Channel, number>>({ me: 0, them: 0 })
 
   const [, forceRender] = useState(0)
   const initialChannels: Channel[] = useMic ? ['me', 'them'] : ['them']
@@ -115,8 +120,18 @@ function App({
     })
     supervisorRef.current = supervisor
 
-    supervisor.on('event', (event) => {
+    supervisor.on('event', (event: CaptureEvent) => {
       store.applyEvent(event)
+      if (event.type === 'ready') {
+        log.append(
+          `ready: ${event.sampleRate} Hz, channels [${event.channels.join(', ')}], locale ${event.locale}`
+        )
+      }
+      if (event.type === 'status') log.append(`status ${event.code}: ${event.message}`)
+      if (event.type === 'stopped') log.append(`helper stopped (${event.reason})`)
+      if (event.type === 'level' && event.peak > peakSinceLog.current[event.channel]) {
+        peakSinceLog.current[event.channel] = event.peak
+      }
       setState((prev) => {
         const next = { ...prev }
         if (event.type === 'ready') {
@@ -137,7 +152,14 @@ function App({
       })
     })
 
-    supervisor.on('restarting', (attempt, max) =>
+    // The helper's stderr carries its diagnostics: audio formats, tap timing,
+    // what is being tapped. That is exactly what explains a bad recording, so
+    // it all goes in the log verbatim.
+    supervisor.on('stderr', (line) => log.append(`helper: ${line}`))
+    supervisor.on('exit', (code) => log.append(`helper exited unexpectedly (code ${code})`))
+
+    supervisor.on('restarting', (attempt, max) => {
+      log.append(`system audio came up silent — restarting capture (${attempt}/${max})`)
       setState((prev) => ({
         ...prev,
         ready: false,
@@ -146,9 +168,10 @@ function App({
           severity: 'warn'
         }
       }))
-    )
+    })
 
-    supervisor.on('gaveUp', () =>
+    supervisor.on('gaveUp', () => {
+      log.append('gave up restarting: system audio still silent after all attempts')
       setState((prev) => ({
         ...prev,
         notice: {
@@ -158,11 +181,20 @@ function App({
           severity: 'warn'
         }
       }))
-    )
+    })
 
     supervisor.start()
 
+    let ticks = 0
     const ticker = setInterval(() => {
+      // A coarse level trace every 15s: enough to see when a channel went
+      // quiet without drowning the log in level events.
+      ticks += 1
+      if (ticks % 15 === 0) {
+        const p = peakSinceLog.current
+        log.append(`levels (15s peak): me ${p.me.toFixed(3)}, them ${p.them.toFixed(3)}`)
+        peakSinceLog.current = { me: 0, them: 0 }
+      }
       setState((prev) => ({
         ...prev,
         elapsedSeconds: (Date.now() - startedAt) / 1000
@@ -174,7 +206,7 @@ function App({
       clearInterval(ticker)
       supervisor.stop()
     }
-  }, [target, useMic, recordPath, store, startedAt])
+  }, [target, useMic, recordPath, store, startedAt, log])
 
   const onClear = useCallback(() => {
     store.clear()
@@ -201,13 +233,19 @@ async function runRecord(argv: string[]): Promise<void> {
   const session = await conversations.createSession(title ? { title } : {})
   const store = new TranscriptStore()
 
+  const log = new SessionLog(session.logPath)
+  log.append(`session started: ${session.title}`)
+  log.append(`target: ${describeSource(target)}; mic: ${useMic ? 'on' : 'off'}`)
+  log.append(`recording to: ${session.audioPath}`)
+
   const { waitUntilExit } = render(
     React.createElement(App, {
       target,
       useMic,
       recordPath: session.audioPath,
       store,
-      startedAt: session.startedAt.getTime()
+      startedAt: session.startedAt.getTime(),
+      log
     })
   )
   await waitUntilExit()
@@ -215,13 +253,16 @@ async function runRecord(argv: string[]): Promise<void> {
   // `store.session` reflects what the helper actually delivered; fall back to
   // the requested channels if it never got as far as a `ready`.
   const channels: Channel[] = store.session?.channels ?? (useMic ? ['me', 'them'] : ['them'])
+  const turns = store.window(Number.POSITIVE_INFINITY)
   await conversations.finalize(session, {
-    turns: store.window(Number.POSITIVE_INFINITY),
+    turns,
     endedAt: new Date(),
     source: describeSource(target),
     channels,
     sampleRate: store.session?.sampleRate ?? null
   })
+  log.append(`session finalized: ${turns.length} turn(s) transcribed`)
+  await log.flush()
 
   process.stdout.write(`saved ${session.dir}\n`)
 }

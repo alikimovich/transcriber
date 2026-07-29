@@ -10,6 +10,7 @@ sent anywhere.
   audio.m4a          stereo AAC — you on the left, everyone else on the right
   transcript.md      speaker-labelled, timestamped
   meta.json          date, duration, source
+  log.txt            capture diagnostics — read this if a recording sounds wrong
 ```
 
 macOS 26+, Apple Silicon, single user. A live terminal view while it records;

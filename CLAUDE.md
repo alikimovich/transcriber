@@ -94,11 +94,24 @@ The store is `cli/src/store.ts`. Sessions land in the user's Obsidian vault:
     audio.m4a                      stereo AAC — me on left, them on right
     transcript.md                  header + speaker-labelled, [mm:ss]-stamped turns
     meta.json                      machine-readable session metadata
+    log.txt                        capture diagnostics, appended live during the
+                                   session — helper stderr (audio formats, tap
+                                   timing), status events, restarts, 15s level
+                                   peaks. The first place to look when a
+                                   recording sounds wrong or a transcript is
+                                   empty; it exists because a garbled recording
+                                   once shipped with no trace of why.
 ```
 
 The transcript is a plain file the user can read and edit — that is the point,
 not an implementation detail. All writes are temp-file + rename so an
-interrupted save can't leave a half-written file.
+interrupted save can't leave a half-written file — except `log.txt`, which is
+append-as-it-happens so a crashed session still leaves its evidence.
+
+`scripts/parakeet-compare.sh <session-dir>` transcribes a saved session with
+Parakeet (via `uvx parakeet-mlx`) and writes `transcript-parakeet.md` beside the
+on-device transcript for engine comparison. It is deliberately a script, not a
+CLI feature: the product stays SpeechAnalyzer-only and dependency-free.
 
 ## Invariants — do not break these
 

@@ -12,7 +12,7 @@
  * interrupted save never leaves a half-written transcript behind.
  */
 
-import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import type { Channel, Turn } from './types.ts'
@@ -36,6 +36,8 @@ export type Session = {
   audioPath: string
   transcriptPath: string
   metaPath: string
+  /** `<dir>/log.txt` — the capture diagnostics log, appended live. */
+  logPath: string
   /** Display title; falls back to the folder-derived timestamp when untitled. */
   title: string
   slug: string | null
@@ -67,6 +69,7 @@ export type SessionMeta = {
 const AUDIO_FILE = 'audio.m4a'
 const TRANSCRIPT_FILE = 'transcript.md'
 const META_FILE = 'meta.json'
+const LOG_FILE = 'log.txt'
 const INDEX_FILE = 'index.md'
 const AGENTS_FILE = 'AGENTS.md'
 
@@ -109,6 +112,7 @@ export class ConversationStore {
       audioPath: join(dir, AUDIO_FILE),
       transcriptPath: join(dir, TRANSCRIPT_FILE),
       metaPath: join(dir, META_FILE),
+      logPath: join(dir, LOG_FILE),
       title: opts.title?.trim() || stamp,
       slug,
       startedAt
@@ -224,6 +228,47 @@ export class ConversationStore {
 }
 
 // ---------------------------------------------------------------------------
+// Session log
+// ---------------------------------------------------------------------------
+
+/**
+ * The capture diagnostics log, `log.txt` in the session folder.
+ *
+ * Appended line by line as things happen — not buffered and written at the end —
+ * so a session that crashes or is killed still leaves the evidence behind. This
+ * exists because a garbled recording once shipped with no trace of why: the
+ * helper's stderr said exactly what was wrong (a format mismatch) and vanished
+ * with the process.
+ *
+ * Appends are deliberately fire-and-forget-safe: a log write failing must never
+ * take the session down, so errors are swallowed.
+ */
+export class SessionLog {
+  private chain: Promise<void> = Promise.resolve()
+
+  constructor(private readonly path: string) {}
+
+  /** Append one timestamped line. Serialized so lines never interleave. */
+  append(message: string): void {
+    const stamp = logStamp(new Date())
+    this.chain = this.chain
+      .then(() => appendFile(this.path, `${stamp}  ${message}\n`))
+      .catch(() => {})
+  }
+
+  /** Resolves when every append issued so far has hit the disk. */
+  flush(): Promise<void> {
+    return this.chain
+  }
+}
+
+/** `HH:MM:SS` local time — matches how the user thinks about a live session. */
+function logStamp(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+// ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
 
@@ -237,6 +282,7 @@ function renderTranscript(session: Session, result: SessionResult, meta: Session
     `- Duration: ${formatDuration(meta.durationSeconds)}`,
     `- Source: ${result.source}`,
     `- Audio: ${AUDIO_FILE} (stereo — me = left, them = right)`,
+    `- Capture log: ${LOG_FILE}`,
     '',
     '---',
     ''
@@ -354,6 +400,9 @@ a plain-file archive meant to stay readable without the tool.
     audio.m4a         stereo AAC — left channel = me (mic), right = them (system audio)
     transcript.md     speaker-labelled, timestamped transcript
     meta.json         machine-readable session metadata
+    log.txt           capture diagnostics: helper output, audio formats, level
+                      summaries, restarts. Read this first when a recording
+                      sounds wrong or a transcript is empty.
 \`\`\`
 
 A session folder is named \`YYYY-MM-DD-HHMM\` (local time), optionally suffixed

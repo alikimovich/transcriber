@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
-import { ConversationStore, conversationsRoot, slugify } from '../src/store.ts'
+import { ConversationStore, conversationsRoot, SessionLog, slugify } from '../src/store.ts'
 import type { Channel, Turn } from '../src/types.ts'
 
 let root: string
@@ -243,5 +243,30 @@ describe('AGENTS.md and ensureRoot', () => {
     })
 
     expect(await readFile(join(root, 'AGENTS.md'), 'utf8')).toBe('my own notes')
+  })
+
+  test('session log appends timestamped lines in order and survives flush', async () => {
+    const store = new ConversationStore()
+    const session = await store.createSession({ title: 'Logged', startedAt: at(14, 32) })
+
+    const log = new SessionLog(session.logPath)
+    log.append('session started')
+    log.append('status system_audio_silent: silence')
+    log.append('levels (15s peak): me 0.120, them 0.000')
+    await log.flush()
+
+    const lines = (await readFile(session.logPath, 'utf8')).trim().split('\n')
+    expect(lines).toHaveLength(3)
+    // HH:MM:SS prefix on every line, messages in append order.
+    for (const line of lines) expect(line).toMatch(/^\d{2}:\d{2}:\d{2}  /)
+    expect(lines[0]).toContain('session started')
+    expect(lines[1]).toContain('status system_audio_silent')
+    expect(lines[2]).toContain('them 0.000')
+  })
+
+  test('a failing log path never throws', async () => {
+    const log = new SessionLog(join(root, 'no-such-dir', 'log.txt'))
+    log.append('into the void')
+    await log.flush() // must resolve, not reject
   })
 })
