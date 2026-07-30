@@ -264,6 +264,42 @@ describe('AGENTS.md and ensureRoot', () => {
     expect(lines[2]).toContain('them 0.000')
   })
 
+  test('checkpoint writes transcript and meta without touching the catalogue', async () => {
+    const store = new ConversationStore()
+    const started = at(14, 32)
+    const session = await store.createSession({ title: 'In Flight', startedAt: started })
+
+    await store.checkpoint(session, {
+      turns: [turn('them', 'Still talking.', started, 3)],
+      endedAt: new Date(started.getTime() + 60_000),
+      source: 'zoom',
+      channels: ['me', 'them'],
+      sampleRate: 48000
+    })
+
+    const md = await readFile(session.transcriptPath, 'utf8')
+    expect(md).toContain('**[00:03] Them:** Still talking.')
+    expect(md).toContain('- Duration: 1m 00s')
+    const meta = JSON.parse(await readFile(session.metaPath, 'utf8'))
+    expect(meta.durationSeconds).toBe(60)
+    // No catalogue write mid-session: checkpoints happen every 30s and the
+    // index is rebuilt by scanning at finalize anyway.
+    const entries = await readdir(root)
+    expect(entries).not.toContain('index.md')
+
+    // A later checkpoint supersedes the earlier one.
+    await store.checkpoint(session, {
+      turns: [turn('them', 'Still talking.', started, 3), turn('me', 'And me.', started, 65)],
+      endedAt: new Date(started.getTime() + 90_000),
+      source: 'zoom',
+      channels: ['me', 'them'],
+      sampleRate: 48000
+    })
+    const md2 = await readFile(session.transcriptPath, 'utf8')
+    expect(md2).toContain('**[01:05] Me:** And me.')
+    expect(md2).toContain('- Duration: 1m 30s')
+  })
+
   test('a failing log path never throws', async () => {
     const log = new SessionLog(join(root, 'no-such-dir', 'log.txt'))
     log.append('into the void')

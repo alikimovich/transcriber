@@ -147,6 +147,34 @@ export class ConversationStore {
   }
 
   /**
+   * Write the transcript and metadata for a session still in progress.
+   *
+   * Same rendering as `finalize`, minus the catalogue work — called on a timer
+   * during recording so that a crash, a kill, or a closed terminal costs at
+   * most the last interval, never the session. A 50-minute conversation was
+   * once lost because the only write happened at quit; a recorder must not
+   * keep an hour of work hostage to a clean shutdown.
+   */
+  async checkpoint(session: Session, result: SessionResult): Promise<void> {
+    const durationSeconds = Math.max(
+      0,
+      Math.round((result.endedAt.getTime() - session.startedAt.getTime()) / 1000)
+    )
+    const meta: SessionMeta = {
+      title: session.title,
+      startedAt: session.startedAt.toISOString(),
+      endedAt: result.endedAt.toISOString(),
+      durationSeconds,
+      source: result.source,
+      channels: result.channels,
+      audioFile: AUDIO_FILE,
+      sampleRate: result.sampleRate
+    }
+    await atomicWrite(session.transcriptPath, renderTranscript(session, result, meta))
+    await atomicWrite(session.metaPath, `${JSON.stringify(meta, null, 2)}\n`)
+  }
+
+  /**
    * Ensure the store root exists and is writable, creating it if missing. Used by
    * `doctor` as a scaffold check; returns the root so the caller can report it.
    */

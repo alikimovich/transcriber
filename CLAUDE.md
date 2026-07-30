@@ -108,6 +108,13 @@ not an implementation detail. All writes are temp-file + rename so an
 interrupted save can't leave a half-written file — except `log.txt`, which is
 append-as-it-happens so a crashed session still leaves its evidence.
 
+**Durability rule: a session may never depend on a clean quit.** The transcript
+and meta are checkpointed to disk every 30s during recording, and SIGHUP/
+SIGTERM trigger a best-effort finalize. A 50-minute conversation was once lost
+because the only write happened at quit. Residual known risk: `audio.m4a` gets
+its AAC trailer only when the helper closes the file, so audio (not the
+transcript) of a session whose *helper* hard-crashes may be unreadable.
+
 `scripts/parakeet-compare.sh <session-dir>` transcribes a saved session with
 Parakeet (via `uvx parakeet-mlx`) and writes `transcript-parakeet.md` beside the
 on-device transcript for engine comparison. It is deliberately a script, not a

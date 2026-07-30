@@ -239,6 +239,43 @@ async function runRecord(argv: string[]): Promise<void> {
   log.append(`target: ${describeSource(target)}; mic: ${useMic ? 'on' : 'off'}`)
   log.append(`recording to: ${session.audioPath}`)
 
+  // `store.session` reflects what the helper actually delivered; fall back to
+  // the requested channels if it never got as far as a `ready`.
+  const snapshot = () => ({
+    turns: store.window(Number.POSITIVE_INFINITY),
+    endedAt: new Date(),
+    source: describeSource(target),
+    channels: (store.session?.channels ?? (useMic ? ['me', 'them'] : ['them'])) as Channel[],
+    sampleRate: store.session?.sampleRate ?? null
+  })
+
+  // Checkpoint the transcript every 30s so a crash, a kill, or a closed
+  // terminal costs at most the last interval. A 50-minute conversation was
+  // once lost to an end-only write; never again.
+  let checkpointed = 0
+  const checkpointer = setInterval(() => {
+    if (store.transcriptRevision === checkpointed) return
+    checkpointed = store.transcriptRevision
+    conversations.checkpoint(session, snapshot()).catch(() => {
+      // A failed checkpoint must never take the session down; the next tick
+      // retries, and finalize still runs at quit.
+      checkpointed = -1
+    })
+  }, 30_000)
+
+  // A terminal closing (SIGHUP) or a polite kill (SIGTERM) bypasses the TUI's
+  // quit path — save what we have before going down.
+  const emergencySave = (signal: string) => {
+    clearInterval(checkpointer)
+    log.append(`received ${signal} — saving and exiting`)
+    conversations
+      .finalize(session, snapshot())
+      .catch(() => {})
+      .finally(() => log.flush().finally(() => process.exit(0)))
+  }
+  process.on('SIGHUP', () => emergencySave('SIGHUP'))
+  process.on('SIGTERM', () => emergencySave('SIGTERM'))
+
   const { waitUntilExit } = render(
     React.createElement(App, {
       target,
@@ -250,19 +287,11 @@ async function runRecord(argv: string[]): Promise<void> {
     })
   )
   await waitUntilExit()
+  clearInterval(checkpointer)
 
-  // `store.session` reflects what the helper actually delivered; fall back to
-  // the requested channels if it never got as far as a `ready`.
-  const channels: Channel[] = store.session?.channels ?? (useMic ? ['me', 'them'] : ['them'])
-  const turns = store.window(Number.POSITIVE_INFINITY)
-  await conversations.finalize(session, {
-    turns,
-    endedAt: new Date(),
-    source: describeSource(target),
-    channels,
-    sampleRate: store.session?.sampleRate ?? null
-  })
-  log.append(`session finalized: ${turns.length} turn(s) transcribed`)
+  const result = snapshot()
+  await conversations.finalize(session, result)
+  log.append(`session finalized: ${result.turns.length} turn(s) transcribed`)
   await log.flush()
 
   process.stdout.write(`saved ${session.dir}\n`)
