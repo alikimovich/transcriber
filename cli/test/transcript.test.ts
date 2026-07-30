@@ -329,7 +329,10 @@ describe('session state', () => {
     expect(store.stoppedReason).toBe('duration')
   })
 
-  test('a second ready starts a fresh transcript because the audio clock reset', () => {
+  test('a second ready archives earlier turns instead of destroying them', () => {
+    // A helper restart resets the audio clock, so segments can't carry over as
+    // segments — but their wall-clock projections must survive. A restart once
+    // fired mid-call and silently dropped minutes of recorded conversation.
     const store = new TranscriptStore()
     store.applyEvent(ready())
     store.applyEvent(final('them', 'previous session', 0, 2))
@@ -338,9 +341,21 @@ describe('session state', () => {
     store.applyEvent(ready(T0 + 100, ['them']))
     store.applyEvent(final('them', 'new session', 0, 2, { t: T0 + 102 }))
 
-    expect(store.render().them).toBe('new session')
+    expect(store.render().them).toBe('previous session new session')
     expect(store.stoppedReason).toBeNull()
     expect(store.session?.channels).toEqual(['them'])
+
+    // Same-channel turns merge as usual, straddling the restart boundary; the
+    // archived text leads and keeps its original wall-clock position.
+    const turns = store.window(Number.POSITIVE_INFINITY)
+    expect(turns.map((t) => t.text)).toEqual(['previous session new session'])
+    const first = turns[0]
+    expect(first && first.startedAt < T0 + 100).toBe(true)
+
+    // An explicit clear drops the archive too — that is the user saying
+    // "forget everything", which a restart is not.
+    store.clear()
+    expect(store.window(Number.POSITIVE_INFINITY)).toEqual([])
   })
 
   test('clear keeps live stream state but forgets the transcript', () => {

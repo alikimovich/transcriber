@@ -59,6 +59,15 @@ export class CaptureSupervisor extends EventEmitter {
   /** Bumped per spawn so late events from a retiring helper can be ignored. */
   private generation = 0
   private stopping = false
+  /**
+   * Whether any helper this session has delivered non-silent system audio.
+   * The silent-tap relaunch exists for exactly one failure: a tap that comes
+   * up dead and stays dead. Once the tap has produced audio, later silence is
+   * a lull in the conversation, not the intermittency — and restarting then
+   * truncates the recording, which once destroyed minutes of a real call.
+   * Mic levels deliberately don't count: they say nothing about the tap.
+   */
+  private sawSystemAudio = false
   private readonly binaryPath: string
   private readonly maxSilentRestarts: number
 
@@ -176,8 +185,23 @@ export class CaptureSupervisor extends EventEmitter {
   }
 
   private handleEvent(event: CaptureEvent): void {
-    // A silent tap reported at startup is the known intermittency. Relaunch.
-    if (event.type === 'status' && event.code === 'system_audio_silent' && !this.stopping) {
+    // Real system audio proves the tap is healthy — permanently, for this
+    // session. Also stop counting past startup failures.
+    if (event.type === 'level' && event.channel === 'them' && event.peak > 0) {
+      this.sawSystemAudio = true
+      this.silentRestarts = 0
+    }
+
+    // A silent tap reported before ANY system audio is the known startup
+    // intermittency. Relaunch. After audio has flowed, silence is just quiet
+    // and must never cost a restart (the helper no longer reports it then
+    // either — this guard also protects against older helper binaries).
+    if (
+      event.type === 'status' &&
+      event.code === 'system_audio_silent' &&
+      !this.stopping &&
+      !this.sawSystemAudio
+    ) {
       if (this.silentRestarts < this.maxSilentRestarts) {
         this.silentRestarts += 1
         this.emit('restarting', this.silentRestarts, this.maxSilentRestarts)
@@ -189,10 +213,6 @@ export class CaptureSupervisor extends EventEmitter {
       // which another relaunch will fix.
       this.emit('gaveUp')
     }
-
-    // Real audio means the tap is healthy; stop counting past failures against
-    // a long-running session.
-    if (event.type === 'level' && event.peak > 0) this.silentRestarts = 0
 
     this.emit('event', event)
   }

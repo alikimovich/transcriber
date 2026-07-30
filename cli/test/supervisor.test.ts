@@ -86,10 +86,48 @@ describe('CaptureSupervisor', () => {
     const supervisor = new CaptureSupervisor({ binaryPath, target: { kind: 'all' } })
     const { events } = collect(supervisor)
     supervisor.start()
-    await wait(1300)
+    await waitUntil(() => events.length >= 2)
     supervisor.stop()
 
     expect(events.map((e) => e.type)).toEqual(['ready', 'level'])
+  })
+
+  test('never restarts a helper whose tap has already produced audio', async () => {
+    // The silent-tap relaunch exists for a tap that comes up dead. Once system
+    // audio has flowed, silence is a lull in the conversation — restarting then
+    // truncates the recording, which once destroyed minutes of a real call.
+    const binaryPath = fakeHelper(
+      `echo '{"type":"level","t":1,"channel":"them","rms":0.2,"peak":0.7}'\n` +
+        `echo '{"type":"status","t":2,"code":"system_audio_silent","message":"lull"}'\n` +
+        `sleep 5\n`
+    )
+    const supervisor = new CaptureSupervisor({ binaryPath, target: { kind: 'all' } })
+    const { events, restarts } = collect(supervisor)
+    supervisor.start()
+    await waitUntil(() => events.some((e) => e.type === 'status'))
+    await wait(200)
+    supervisor.stop()
+
+    expect(restarts).toEqual([])
+    // The status still reaches the UI; it just no longer costs a restart.
+    expect(events.map((e) => e.type)).toEqual(['level', 'status'])
+  })
+
+  test('mic audio does not vouch for the tap', async () => {
+    // Only system-audio levels prove the tap works. A helper whose mic is loud
+    // but whose tap reports silence is exactly the born-dead case: restart it.
+    const binaryPath = fakeHelper(
+      `echo '{"type":"level","t":1,"channel":"me","rms":0.2,"peak":0.7}'\n` +
+        `echo '{"type":"status","t":2,"code":"system_audio_silent","message":"dead"}'\n` +
+        `sleep 5\n`
+    )
+    const supervisor = new CaptureSupervisor({ binaryPath, target: { kind: 'all' } })
+    const { restarts } = collect(supervisor)
+    supervisor.start()
+    await waitUntil(() => restarts.length > 0)
+    supervisor.stop()
+
+    expect(restarts).toEqual([1])
   })
 
   test('ignores a blank or unparseable line without dropping the stream', async () => {

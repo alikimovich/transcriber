@@ -238,6 +238,7 @@ func runCapture(_ o: Options) async -> Never {
 
     let deadline = o.seconds.map { Date().addingTimeInterval($0) }
     var reportedSilence = !systemAudioLive
+    var systemEverLive = systemAudioLive
     let loopStart = Date()
     var micPeakEver = 0.0
     var reportedMicSilence = false
@@ -272,9 +273,14 @@ func runCapture(_ o: Options) async -> Never {
             }
         }
 
-        // Report a silent system-audio stream once — callbacks arriving with
-        // nothing but zeroes is what a missing permission looks like.
-        if them.isSilent, !reportedSilence {
+        // Report a silent system-audio stream once, and only while the tap has
+        // NEVER been live this run — that is what a dead tap or a missing
+        // permission looks like. Once audio has flowed, silence is somebody not
+        // talking: reporting it made the supervisor restart a healthy capture
+        // mid-call, which truncated the recording. `system_audio_silent` is a
+        // born-dead signal, nothing else.
+        if them.peak > 0 { systemEverLive = true }
+        if them.isSilent, !reportedSilence, !systemEverLive {
             reportedSilence = true
             writer.emit(
                 .status(

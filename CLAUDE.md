@@ -240,6 +240,16 @@ running the whole chain rather than the parts:
   Overlapping them produces a newcomer that captures nothing. The record path
   is reused across a restart; the outgoing helper closes its file first, and
   the replacement truncates.
+- **Silence after audio is a lull, never a restart trigger.** The silent-tap
+  relaunch exists for one failure only: a tap born dead. A session once
+  restarted mid-call because the other side stopped talking for a while —
+  truncating the audio file and (before `TranscriptStore` learned to archive
+  across `ready`) destroying 2.5 minutes of recorded conversation. Both ends
+  enforce this now: the helper only emits `system_audio_silent` while the tap
+  has never been live, and the supervisor ignores that status once it has seen
+  a non-silent `them` level (mic levels don't vouch for the tap). Truncation
+  on restart is safe *because* of this rule — a restart can only happen when
+  nothing but silence has been captured.
 
 `cli/test/supervisor.test.ts` drives a scripted fake helper, so this is
 testable without audio hardware. Extend that rather than testing by hand.

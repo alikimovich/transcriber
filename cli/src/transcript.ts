@@ -97,6 +97,16 @@ export class TranscriptStore {
   private readonly slots: Record<Channel, ChannelSlot>
   private readonly keepAbandonedVolatiles: boolean
   private seq = 0
+  /**
+   * Turns from before a helper restart, already projected onto the wall clock.
+   *
+   * A restart resets the audio timelines, so live segments can't be carried
+   * across it — but their wall-clock projections are already settled and can.
+   * They must be: a restart once fired mid-call and silently destroyed two and
+   * a half minutes of recorded conversation. Frozen turns only ever grow and
+   * are only dropped by an explicit clear().
+   */
+  private frozen: Turn[] = []
 
   /** The most recent status event, whichever channel it concerns. */
   lastStatus: StatusEvent | null = null
@@ -158,6 +168,11 @@ export class TranscriptStore {
     const cutoff = seconds === Number.POSITIVE_INFINITY ? Number.NEGATIVE_INFINITY : now - seconds
 
     const projected: { turn: Turn; seq: number }[] = []
+    // Frozen turns predate every live segment, so negative pseudo-seqs keep
+    // their original order as the sort tiebreaker.
+    this.frozen.forEach((turn, i) => {
+      if (turn.endedAt >= cutoff) projected.push({ turn, seq: i - this.frozen.length })
+    })
     for (const channel of CHANNELS) {
       for (const segment of this.segmentsOf(channel)) {
         const turn = this.project(channel, segment)
@@ -189,11 +204,20 @@ export class TranscriptStore {
   }
 
   /**
-   * Drop all transcript state, including the audio-clock estimates. Levels,
-   * statuses and session info are kept: they describe the live stream rather
-   * than the transcript. Construct a new store for a genuinely new session.
+   * Drop all transcript state — the live segments, the audio-clock estimates,
+   * and the frozen turns from before any restart. Levels, statuses and session
+   * info are kept: they describe the live stream rather than the transcript.
+   * Construct a new store for a genuinely new session.
    */
   clear(): void {
+    this.frozen = []
+    this.resetTimelines()
+  }
+
+  // -------------------------------------------------------------------------
+
+  /** Forget the current audio timelines without touching the frozen archive. */
+  private resetTimelines(): void {
     for (const channel of CHANNELS) {
       const slot = this.slots[channel]
       slot.finals = []
@@ -204,14 +228,14 @@ export class TranscriptStore {
     this.transcriptRevision += 1
   }
 
-  // -------------------------------------------------------------------------
-
   private applyReady(e: ReadyEvent): void {
     // A second `ready` means the helper restarted: the audio timelines have
-    // reset to zero and previous segments can no longer be placed on the wall
-    // clock, so the transcript cannot be carried over.
+    // reset to zero, so live segments can't be carried over as segments. Their
+    // wall-clock projections are settled, though — archive them. Losing them
+    // instead once cost a session its first two and a half minutes.
     if (this.session !== null) {
-      this.clear()
+      this.frozen = this.window(Number.POSITIVE_INFINITY)
+      this.resetTimelines()
       this.stoppedReason = null
     }
     this.session = e
@@ -311,10 +335,9 @@ export class TranscriptStore {
   }
 
   private renderChannel(channel: Channel): string {
-    return this.segmentsOf(channel)
-      .map((s) => s.text)
-      .filter((t) => t !== '')
-      .join(' ')
+    const frozen = this.frozen.filter((t) => t.channel === channel).map((t) => t.text)
+    const live = this.segmentsOf(channel).map((s) => s.text)
+    return [...frozen, ...live].filter((t) => t !== '').join(' ')
   }
 }
 
