@@ -5,6 +5,7 @@
 //   doctor   check the capture helper, audio, and the conversation store
 
 import { spawn, spawnSync } from 'node:child_process'
+import { statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { render } from 'ink'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
@@ -20,6 +21,26 @@ const CAPTURE_BINARY = resolve(import.meta.dirname, '../../capture/ilcapture')
 function fail(message: string): never {
   process.stderr.write(`${message}\n`)
   process.exit(1)
+}
+
+/** The repo's short git rev, or "unknown" outside a repo / without git. */
+function repoRevision(): string {
+  const result = spawnSync(
+    'git',
+    ['-C', resolve(import.meta.dirname, '../..'), 'rev-parse', '--short', 'HEAD'],
+    { encoding: 'utf8' }
+  )
+  const rev = result.status === 0 ? result.stdout.trim() : ''
+  return rev || 'unknown'
+}
+
+/** When the helper binary was built, or "missing" if it isn't there. */
+function binaryMtime(path: string): string {
+  try {
+    return statSync(path).mtime.toISOString()
+  } catch {
+    return 'missing'
+  }
 }
 
 function flagValue(argv: string[], flag: string): string | undefined {
@@ -236,6 +257,11 @@ async function runRecord(argv: string[]): Promise<void> {
 
   const log = new SessionLog(session.logPath)
   log.append(`session started: ${session.title}`)
+  // Which code recorded this session. A data-loss postmortem once had to
+  // infer the build from behavioral fingerprints; never make that necessary
+  // again. The CLI runs from the repo, so the git rev is the CLI version; the
+  // helper is a build artifact that can lag the repo, so its mtime matters.
+  log.append(`build: ${repoRevision()}, helper built ${binaryMtime(CAPTURE_BINARY)}`)
   log.append(`target: ${describeSource(target)}; mic: ${useMic ? 'on' : 'off'}`)
   log.append(`recording to: ${session.audioPath}`)
 
