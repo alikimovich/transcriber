@@ -2,10 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Keeps the old identifier so the spike's existing TCC grants survive;
-	     see capture/Info.plist for the same reasoning. -->
 	<key>CFBundleIdentifier</key>
-	<string>com.alikimovich.interview-lens.probe</string>
+	<string>com.alikimovich.transcriber.probe</string>
 	<key>CFBundleName</key>
 	<string>Transcriber Probe</string>
 	<key>CFBundleShortVersionString</key>

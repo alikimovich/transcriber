@@ -12,7 +12,7 @@ Run `spike/build.sh` then `./spike/ilprobe tap` to reproduce.
 | Tap audio format | 48000 Hz, 2 ch, 32-bit float. |
 
 Per-process scoping is the reason this is native rather than Electron: the
-interviewer channel can be scoped to the meeting app alone, so music and
+them channel can be scoped to the meeting app alone, so music and
 notification sounds never enter the transcript.
 
 ## Two traps, both found the hard way
@@ -84,7 +84,7 @@ rather than an error.
   process, not an interactive terminal. For CLI binaries macOS generally
   attributes the grant to the *responsible* process (the terminal), not the
   binary — meaning the grant may read as "Ghostty can record system audio"
-  rather than "Interview Lens can", and may differ per terminal. If that proves
+  rather than "Transcriber can", and may differ per terminal. If that proves
   annoying, wrap the sidecar in a minimal headless `.app` bundle so it gets its
   own TCC identity; the binary itself does not change.
 - Two concurrent `SpeechTranscriber` instances (one per channel) — untested.

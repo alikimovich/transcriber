@@ -2,12 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Deliberately still the interview-lens identifier: macOS keys the
-	     microphone and system-audio TCC grants to it (via the code signature).
-	     Renaming it to match the transcriber name would silently revoke both
-	     grants and force the user through the permission prompts again. -->
 	<key>CFBundleIdentifier</key>
-	<string>com.alikimovich.interview-lens.capture</string>
+	<string>com.alikimovich.transcriber.capture</string>
 	<key>CFBundleName</key>
 	<string>Transcriber Capture</string>
 	<key>CFBundleShortVersionString</key>
