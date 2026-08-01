@@ -6,7 +6,7 @@ stereo audio file and a plain-markdown transcript. Fully on-device. Nothing is
 sent anywhere.
 
 ```
-~/memory/conversations/2026/07/2026-07-28-1432-weekly-sync/
+~/Documents/Conversations/2026/07/2026-07-28-1432-weekly-sync/
   audio.m4a          stereo AAC — you on the left, everyone else on the right
   transcript.md      speaker-labelled, timestamped
   meta.json          date, duration, source
@@ -47,19 +47,42 @@ which can only capture all system output.
 
 ## Install
 
+Requirements either way: **Apple Silicon and macOS 26+** (on-device
+transcription uses SpeechAnalyzer).
+
+### From a release
+
+Grab the latest zip from
+[Releases](https://github.com/alikimovich/transcriber/releases), then:
+
+```sh
+unzip transcriber-v*-macos-arm64.zip
+mv transcriber-v*-macos-arm64/{transcriber,tcapture} ~/.local/bin/
+tcapture request-mic        # grant microphone access once, up front
+transcriber doctor
+```
+
+The two binaries must stay side by side — `transcriber` looks for its capture
+helper next to its own executable. Both are signed and notarized; no build
+tools, bun, or Xcode needed. Recordings default to `~/Documents/Conversations`
+(set `TRANSCRIBER_CONVERSATIONS` to change that).
+
+### From source
+
 ```sh
 git clone git@github.com:alikimovich/transcriber.git
 cd transcriber
 ./install.sh
 ```
 
-The installer checks prerequisites, asks for everything it needs in one block,
-then builds and configures without further interruption. It's safe to re-run —
-anything already in place is detected and skipped.
+The installer checks prerequisites, asks for everything it needs in one block
+(including where to store recordings), then builds and configures without
+further interruption. It's safe to re-run — anything already in place is
+detected and skipped.
 
-Requirements: Apple Silicon, macOS 26+, and the **Command Line Tools**
-(`xcode-select --install`, about 1GB). Full Xcode is *not* needed — the build
-calls `swiftc` directly. `bun` is installed automatically if missing.
+Building needs the **Command Line Tools** (`xcode-select --install`, about
+1GB). Full Xcode is *not* needed — the build calls `swiftc` directly. `bun` is
+installed automatically if missing.
 
 ### Signing
 
@@ -108,13 +131,14 @@ While recording you see per-channel level meters, elapsed time, and the live
 transcript scrolling by. Press **q** to stop; the session folder — audio,
 transcript and metadata — is written and its path printed.
 
-Point the archive somewhere other than the vault with `TRANSCRIBER_CONVERSATIONS`.
+Point the archive somewhere else with `TRANSCRIBER_CONVERSATIONS` (the
+installer also asks and bakes the answer into the launcher).
 
 ## Privacy
 
 - **Nothing leaves the machine.** Transcription is fully on-device via Apple's
   `SpeechAnalyzer`; there are no network calls of any kind.
-- Audio and transcripts are written locally, to `~/memory/conversations` (or
+- Audio and transcripts are written locally, to `~/Documents/Conversations` (or
   wherever `TRANSCRIBER_CONVERSATIONS` points). Deleting a session folder
   deletes the recording — there is no copy anywhere else.
 - Audio is compressed AAC, not lossless — small enough to keep, good enough to

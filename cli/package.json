@@ -14,7 +14,8 @@
     "lint": "biome check src test",
     "format": "biome format --write src test",
     "check": "bun run typecheck && bun run lint && bun test",
-    "start": "bun run src/cli.tsx"
+    "start": "bun run src/cli.tsx",
+    "build:bin": "bun build --compile src/cli.tsx --outfile dist/transcriber"
   },
   "dependencies": {
     "ink": "^7.1.1",
@@ -25,7 +26,8 @@
     "@biomejs/biome": "^2.5.5",
     "@types/bun": "latest",
     "@types/react": "^19.2.17",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "react-devtools-core": "file:./stub/react-devtools-core"
   },
   "bin": {
     "transcriber": "./src/cli.tsx"

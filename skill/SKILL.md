@@ -20,7 +20,8 @@ job is to drive it and to help the user navigate what it saved.
 ## Where things live
 
 ```
-~/memory/conversations/            (override with TRANSCRIBER_CONVERSATIONS)
+~/Documents/Conversations/         (default; the launcher may pin another
+                                    root via TRANSCRIBER_CONVERSATIONS)
   AGENTS.md                        the archive schema — read it first
   index.md                        generated catalogue, newest first
   YYYY/MM/YYYY-MM-DD-HHMM[-slug]/
@@ -34,7 +35,7 @@ transcriber doctor
 ```
 
 If the command is missing, Transcriber is not installed — point the user at
-`~/dev/transcriber/install.sh` and stop.
+`install.sh` in the repo (https://github.com/alikimovich/transcriber) and stop.
 
 ## Start a recording
 
@@ -59,9 +60,9 @@ up silent about one launch in three — the CLI auto-restarts and shows
 Everything is plain local files — read them directly.
 
 - **Recent sessions:** `Read` the generated `index.md`, or
-  `Glob` `~/memory/conversations/**/meta.json` and read the newest.
+  `Glob` `<root>/**/meta.json` and read the newest.
 - **Find a conversation by content:** `Grep` across
-  `~/memory/conversations/**/transcript.md` for a name, topic or phrase, then
+  `<root>/**/transcript.md` for a name, topic or phrase, then
   read the matching transcript.
 - **Summarise or extract for the user** from a transcript they point you at —
   that's your job as the agent reading the file, not something Transcriber does.
@@ -79,7 +80,8 @@ rebuilds the index).
 - **Never send a transcript or audio anywhere.** The whole point is that it
   stays on the machine. No web fetches, no uploads.
 - **Don't hand-edit `index.md`** — it's generated and will be overwritten.
-- The archive lives in the user's Obsidian vault, so transcripts are searchable
-  there too. Audio files sync as well and can get heavy over time — mention
-  moving the archive out with `TRANSCRIBER_CONVERSATIONS` if it grows.
+- If the archive lives inside a synced or indexed folder (an Obsidian vault,
+  iCloud, Dropbox), transcripts are searchable there too — but audio syncs as
+  well and gets heavy over time. Mention moving the archive with
+  `TRANSCRIBER_CONVERSATIONS` if it grows.
 - **Confirm before deleting** any session — there is no second copy.

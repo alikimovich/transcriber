@@ -11,12 +11,12 @@ import { render } from 'ink'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 
 import { ConversationStore, conversationsRoot, SessionLog } from './store.ts'
-import { CaptureSupervisor, type CaptureTarget } from './supervisor.ts'
+import { CaptureSupervisor, type CaptureTarget, captureBinaryPath } from './supervisor.ts'
 import { TranscriptStore } from './transcript.ts'
 import { Tui, type ViewState } from './tui.tsx'
 import type { CaptureEvent, Channel } from './types.ts'
 
-const CAPTURE_BINARY = resolve(import.meta.dirname, '../../capture/tcapture')
+const CAPTURE_BINARY = captureBinaryPath()
 
 function fail(message: string): never {
   process.stderr.write(`${message}\n`)

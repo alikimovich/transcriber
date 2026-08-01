@@ -258,7 +258,7 @@ describe('AGENTS.md and ensureRoot', () => {
     const lines = (await readFile(session.logPath, 'utf8')).trim().split('\n')
     expect(lines).toHaveLength(3)
     // HH:MM:SS prefix on every line, messages in append order.
-    for (const line of lines) expect(line).toMatch(/^\d{2}:\d{2}:\d{2}  /)
+    for (const line of lines) expect(line).toMatch(/^\d{2}:\d{2}:\d{2} {2}/)
     expect(lines[0]).toContain('session started')
     expect(lines[1]).toContain('status system_audio_silent')
     expect(lines[2]).toContain('them 0.000')

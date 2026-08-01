@@ -7,9 +7,29 @@
 
 import { spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import { resolve } from 'node:path'
+import { existsSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import type { CaptureEvent } from './types.ts'
+
+/**
+ * Where the `tcapture` helper lives. Three homes, tried in order:
+ *  1. `TRANSCRIBER_CAPTURE` — explicit override.
+ *  2. Next to the running executable — how a compiled release ships, the two
+ *     binaries side by side.
+ *  3. `capture/tcapture` in the repo — a source checkout. In a compiled
+ *     binary `import.meta.dirname` points into the bundled virtual
+ *     filesystem, so this candidate simply never exists there.
+ * When none exist, the repo path is returned anyway so error messages point
+ * somewhere actionable ("run capture/build.sh").
+ */
+export function captureBinaryPath(): string {
+  const override = process.env.TRANSCRIBER_CAPTURE
+  if (override !== undefined && override !== '') return override
+  const repoBuild = resolve(import.meta.dirname, '../../capture/tcapture')
+  const candidates = [join(dirname(process.execPath), 'tcapture'), repoBuild]
+  return candidates.find((p) => existsSync(p)) ?? repoBuild
+}
 
 export type CaptureTarget =
   | { kind: 'process'; pids: number[] }
@@ -73,7 +93,7 @@ export class CaptureSupervisor extends EventEmitter {
 
   constructor(private readonly options: SupervisorOptions) {
     super()
-    this.binaryPath = options.binaryPath ?? resolve(import.meta.dirname, '../../capture/tcapture')
+    this.binaryPath = options.binaryPath ?? captureBinaryPath()
     this.maxSilentRestarts = options.maxSilentRestarts ?? 3
   }
 

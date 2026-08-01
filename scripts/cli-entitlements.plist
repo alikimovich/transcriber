@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!-- Entitlements for the compiled CLI (a bun standalone binary). Bun embeds
+     JavaScriptCore, whose JIT needs executable memory — without these two,
+     a hardened-runtime signature (required for notarization) makes the
+     binary crash on launch. The capture helper has its own entitlements in
+     capture/entitlements.plist. -->
+<dict>
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+</dict>
+</plist>

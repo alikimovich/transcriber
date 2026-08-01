@@ -1,8 +1,8 @@
 /**
  * The conversation-log store.
  *
- * A recorded session is a self-describing folder inside the user's Obsidian
- * vault, laid out so an LLM (or the user) can navigate the archive months later
+ * A recorded session is a self-describing folder inside the conversation
+ * archive, laid out so an LLM (or the user) can navigate it months later
  * without this tool: a compressed audio file, a markdown transcript, and a
  * machine-readable `meta.json`. A generated `index.md` catalogues everything and
  * an `AGENTS.md` documents the schema.
@@ -18,14 +18,15 @@ import { dirname, join, relative } from 'node:path'
 import type { Channel, Turn } from './types.ts'
 
 /**
- * `~/memory/conversations`, inside the Obsidian vault. Overridable through
- * `TRANSCRIBER_CONVERSATIONS`, which is what the tests use so they never
- * touch the real vault.
+ * `~/Documents/Conversations` by default. Overridable through
+ * `TRANSCRIBER_CONVERSATIONS` — the installer bakes the chosen location into
+ * the launcher, and the tests point it at a temp dir so they never touch a
+ * real archive.
  */
 export function conversationsRoot(): string {
   const override = process.env.TRANSCRIBER_CONVERSATIONS
   if (override !== undefined && override !== '') return override
-  return join(homedir(), 'memory', 'conversations')
+  return join(homedir(), 'Documents', 'Conversations')
 }
 
 /** A session's on-disk locations, handed back the moment its folder is created. */

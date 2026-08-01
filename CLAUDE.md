@@ -73,6 +73,25 @@ bun run src/cli.tsx record --match zoom --title "weekly sync"
 
 `cli/package.json` has a `check` script running typecheck, lint and tests.
 
+## Releasing
+
+Distribution is a GitHub release of two notarized standalone binaries —
+`transcriber` (the CLI, compiled with `bun build --compile`) and `tcapture` —
+which must sit side by side (`captureBinaryPath()` in `cli/src/supervisor.ts`
+looks next to the executable).
+
+```sh
+# bump the version in cli/package.json AND capture/Info.plist, commit, then:
+scripts/release.sh 0.2.0
+```
+
+The script refuses to run on a dirty tree, a version mismatch, a missing
+Developer ID, or missing notarization credentials (one-time
+`notarytool store-credentials` setup — see the script header). The compiled
+CLI needs the JIT entitlements in `scripts/cli-entitlements.plist` or the
+hardened-runtime signature kills it on launch. `cli/stub/react-devtools-core`
+exists so the compile can bundle ink; see its package.json.
+
 ## Conventions
 
 - **bun**, not npm or node. Matches every recent repo in `~/dev`.
@@ -86,10 +105,11 @@ bun run src/cli.tsx record --match zoom --title "weekly sync"
 
 ## Where recordings go
 
-The store is `cli/src/store.ts`. Sessions land in the user's Obsidian vault:
+The store is `cli/src/store.ts`. Sessions land in the conversation archive:
 
 ```
-~/memory/conversations/            (override with TRANSCRIBER_CONVERSATIONS)
+~/Documents/Conversations/         (override with TRANSCRIBER_CONVERSATIONS;
+                                   the installed launcher bakes the chosen path in)
   AGENTS.md                        schema, written once; describes the layout
   index.md                        generated catalogue, newest first; rebuilt by
                                    scanning the tree, so it self-heals
@@ -128,7 +148,7 @@ CLI feature: the product stays SpeechAnalyzer-only and dependency-free.
 **Privacy is now "local, not nowhere".** This is the one invariant that
 *changed* with the pivot. Previously audio never touched disk; now recording
 audio **is the product**, so a session's audio and transcript are written to
-`~/memory/conversations`. What holds firm: transcription is fully on-device and
+the local conversation archive. What holds firm: transcription is fully on-device and
 **there are no network calls at all** — nothing is sent anywhere. If a change
 adds a network call, that is a product decision, not an implementation detail —
 surface it loudly.

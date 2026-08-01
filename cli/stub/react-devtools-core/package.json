@@ -1,0 +1,7 @@
+{
+  "name": "react-devtools-core",
+  "version": "0.0.0-stub",
+  "description": "No-op stand-in so `bun build --compile` can bundle ink, whose devtools module imports react-devtools-core unconditionally. Ink only executes that module when DEV=true, so the stub is never exercised in normal runs — it exists to make the standalone binary buildable without shipping the real devtools.",
+  "type": "module",
+  "main": "index.js"
+}
