@@ -48,8 +48,8 @@ which can only capture all system output.
 ## Install
 
 ```sh
-git clone git@github.com:alikimovich/interview-lens.git
-cd interview-lens
+git clone git@github.com:alikimovich/transcriber.git
+cd transcriber
 ./install.sh
 ```
 

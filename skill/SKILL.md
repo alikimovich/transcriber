@@ -34,7 +34,7 @@ interview-lens doctor
 ```
 
 If the command is missing, Lens is not installed — point the user at
-`~/dev/interview-lens/install.sh` and stop.
+`~/dev/transcriber/install.sh` and stop.
 
 ## Start a recording
 
