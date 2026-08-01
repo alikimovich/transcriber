@@ -1,4 +1,4 @@
-// ilcapture — the capture helper for Interview Lens.
+// tcapture — the capture helper for Transcriber.
 //
 // Taps system audio (them) and the microphone (me), transcribes both
 // on-device, optionally records both to one stereo AAC file, and writes one
@@ -57,15 +57,15 @@ func parseOptions(_ args: [String]) -> Options {
 func usage() -> Never {
     note(
         """
-        ilcapture — Interview Lens capture helper
+        tcapture — Transcriber capture helper
 
-          ilcapture list
+          tcapture list
               List processes currently producing audio.
 
-          ilcapture request-mic
+          tcapture request-mic
               Ask for microphone access once, interactively.
 
-          ilcapture capture [options]
+          tcapture capture [options]
               Capture and transcribe. Emits JSONL on stdout.
 
               --system-pid <pid>     tap only this process (repeatable)
@@ -107,7 +107,7 @@ func resolveTapTargets(_ o: Options) -> [AudioObjectID] {
     if let match = o.systemMatch {
         let found = AudioProcesses.search(match)
         guard !found.isEmpty else {
-            note("No audio process matches \"\(match)\". Try: ilcapture list")
+            note("No audio process matches \"\(match)\". Try: tcapture list")
             exit(2)
         }
         note("Tapping: " + found.map { "\($0.name) (\($0.pid))" }.joined(separator: ", "))
@@ -117,7 +117,7 @@ func resolveTapTargets(_ o: Options) -> [AudioObjectID] {
     if !o.systemPIDs.isEmpty {
         let found = AudioProcesses.matching(pids: o.systemPIDs)
         guard !found.isEmpty else {
-            note("No audio process objects for pids \(o.systemPIDs). Try: ilcapture list")
+            note("No audio process objects for pids \(o.systemPIDs). Try: tcapture list")
             exit(2)
         }
         note("Tapping: " + found.map { "\($0.name) (\($0.pid))" }.joined(separator: ", "))
@@ -213,7 +213,7 @@ func runCapture(_ o: Options) async -> Never {
             .status(
                 code: .micPermissionDenied,
                 message:
-                    "microphone access not yet granted; run `ilcapture request-mic` once, then restart. Continuing with the them channel only"
+                    "microphone access not yet granted; run `tcapture request-mic` once, then restart. Continuing with the them channel only"
             ))
     default:
         break

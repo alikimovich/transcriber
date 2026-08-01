@@ -1,7 +1,7 @@
 // Conversation store tests.
 //
 // No network, no audio: these exercise the on-disk layout only, with
-// INTERVIEW_LENS_CONVERSATIONS pointed at a throwaway temp dir so the real
+// TRANSCRIBER_CONVERSATIONS pointed at a throwaway temp dir so the real
 // Obsidian vault is never touched.
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
@@ -16,11 +16,11 @@ let root: string
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'il-conversations-'))
-  process.env.INTERVIEW_LENS_CONVERSATIONS = root
+  process.env.TRANSCRIBER_CONVERSATIONS = root
 })
 afterEach(() => {
   rmSync(root, { recursive: true, force: true })
-  delete process.env.INTERVIEW_LENS_CONVERSATIONS
+  delete process.env.TRANSCRIBER_CONVERSATIONS
 })
 
 /** A local-time date, used to make folder names and stamps deterministic. */

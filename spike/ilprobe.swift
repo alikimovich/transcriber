@@ -1,4 +1,4 @@
-// ilprobe — risk spike for Interview Lens.
+// ilprobe — risk spike for Transcriber.
 //
 // Answers three questions before any real code gets written:
 //   1. Can we enumerate audio-producing processes and map them to PIDs?
@@ -141,7 +141,7 @@ func runTap(pids: [pid_t], seconds: Double) -> Int32 {
     } else {
         desc = CATapDescription(stereoMixdownOfProcesses: targets)
     }
-    desc.name = "InterviewLens Probe Tap"
+    desc.name = "Transcriber Probe Tap"
     desc.isPrivate = true
     desc.muteBehavior = .unmuted  // capture without muting the user's playback
 
@@ -174,9 +174,9 @@ func runTap(pids: [pid_t], seconds: Double) -> Int32 {
     }
     stage("anchoring aggregate to output device \(outputUID)")
 
-    let aggUID = "com.alikimovich.interview-lens.probe.\(UUID().uuidString)"
+    let aggUID = "com.alikimovich.transcriber.probe.\(UUID().uuidString)"
     let aggDesc: [String: Any] = [
-        kAudioAggregateDeviceNameKey as String: "InterviewLens Probe",
+        kAudioAggregateDeviceNameKey as String: "Transcriber Probe",
         kAudioAggregateDeviceUIDKey as String: aggUID,
         kAudioAggregateDeviceMainSubDeviceKey as String: outputUID,
         kAudioAggregateDeviceClockDeviceKey as String: outputUID,
@@ -340,7 +340,7 @@ case "tap":
 default:
     print(
         """
-        ilprobe — Interview Lens capture spike
+        ilprobe — Transcriber capture spike
 
           ilprobe list              list audio-producing processes
           ilprobe tap               tap all system output for 5s

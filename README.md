@@ -1,4 +1,4 @@
-# Interview Lens
+# Transcriber
 
 Records and transcribes your conversations — your own voice and any meeting or
 call playing on your Mac — and saves each one as a folder you own: a compressed
@@ -21,7 +21,7 @@ no other GUI.
 Two processes, one pipe:
 
 ```
-ilcapture (Swift)                          interview-lens (bun/TS)
+tcapture (Swift)                          transcriber (bun/TS)
 ─────────────────────────                  ────────────────────────────
 Core Audio process tap  ─┐                 rolling transcript
 AVAudioEngine mic       ─┼── JSONL ──▶     live view · session store
@@ -72,7 +72,7 @@ changes. Both work.
 ### Manual build
 
 ```sh
-./capture/build.sh          # → capture/ilcapture, auto-detects a signing identity
+./capture/build.sh          # → capture/tcapture, auto-detects a signing identity
 cd cli && bun install
 ```
 
@@ -81,11 +81,11 @@ cd cli && bun install
 | Permission | When it's asked | Where to fix it |
 |---|---|---|
 | System audio recording | first capture | Privacy & Security → Screen & System Audio Recording |
-| Microphone | `ilcapture request-mic` | Privacy & Security → Microphone |
+| Microphone | `tcapture request-mic` | Privacy & Security → Microphone |
 
 The capture path deliberately never shows a permission dialog — a headless
 helper blocking on a modal prompt is indistinguishable from a hang. Run
-`./capture/ilcapture request-mic` once, up front.
+`./capture/tcapture request-mic` once, up front.
 
 A missing microphone degrades the session to *them*-only rather than failing
 it, so a call still gets recorded even if you never granted the mic.
@@ -93,29 +93,29 @@ it, so a call still gets recorded even if you never granted the mic.
 ## Record
 
 ```sh
-interview-lens doctor                    # permissions, audio, store
-interview-lens record --match zoom       # record just Zoom
-interview-lens record --all              # record all system audio
-interview-lens record --match zoom --title "weekly sync"
-interview-lens record --all --no-mic     # them only
+transcriber doctor                    # permissions, audio, store
+transcriber record --match zoom       # record just Zoom
+transcriber record --all              # record all system audio
+transcriber record --match zoom --title "weekly sync"
+transcriber record --all --no-mic     # them only
 
 # raw capture, no session, useful for debugging
-./capture/ilcapture list
-./capture/ilcapture capture --system-match zoom | jq -c 'select(.type=="transcript")'
+./capture/tcapture list
+./capture/tcapture capture --system-match zoom | jq -c 'select(.type=="transcript")'
 ```
 
 While recording you see per-channel level meters, elapsed time, and the live
 transcript scrolling by. Press **q** to stop; the session folder — audio,
 transcript and metadata — is written and its path printed.
 
-Point the archive somewhere other than the vault with `INTERVIEW_LENS_CONVERSATIONS`.
+Point the archive somewhere other than the vault with `TRANSCRIBER_CONVERSATIONS`.
 
 ## Privacy
 
 - **Nothing leaves the machine.** Transcription is fully on-device via Apple's
   `SpeechAnalyzer`; there are no network calls of any kind.
 - Audio and transcripts are written locally, to `~/memory/conversations` (or
-  wherever `INTERVIEW_LENS_CONVERSATIONS` points). Deleting a session folder
+  wherever `TRANSCRIBER_CONVERSATIONS` points). Deleting a session folder
   deletes the recording — there is no copy anywhere else.
 - Audio is compressed AAC, not lossless — small enough to keep, good enough to
   re-transcribe or feed to other tools later.
@@ -123,9 +123,9 @@ Point the archive somewhere other than the vault with `INTERVIEW_LENS_CONVERSATI
 
 ## Manual smoke test
 
-1. `./capture/ilcapture list` — the meeting app appears, marked `▶` while it
+1. `./capture/tcapture list` — the meeting app appears, marked `▶` while it
    plays audio.
-2. Play a video in a browser; `ilcapture capture --system-match <browser>`
+2. Play a video in a browser; `tcapture capture --system-match <browser>`
    shows rising levels and transcript lines on the `them` channel.
 3. Scoping: with audio playing, tap a *different* process — levels stay at
    zero. This is what proves per-process isolation.
@@ -134,11 +134,11 @@ Point the archive somewhere other than the vault with `INTERVIEW_LENS_CONVERSATI
    voice only on `them`. On the built-in speakers, check the session's
    `log.txt` for `echo cancellation: on` and confirm the remote voice stays
    off the `me` channel.
-6. `interview-lens record --match <browser>`, let it run a bit, stop with **q**;
+6. `transcriber record --match <browser>`, let it run a bit, stop with **q**;
    confirm a session folder was written and `transcript.md` reads correctly.
 7. Play the saved `audio.m4a` (`afplay …/audio.m4a`) — it should be a valid
    stereo file with you on the left, them on the right.
-8. Stop and confirm no aggregate audio device is left behind (`ilcapture list`
+8. Stop and confirm no aggregate audio device is left behind (`tcapture list`
    still works, system audio still plays).
 
 ## Known issues
@@ -150,7 +150,7 @@ the call rather than during it.
 
 **The system tap comes up silent on roughly one launch in three.** Callbacks
 arrive at the normal rate with the correct format; every sample is just zero.
-Rebuilding the tap in-process never helps, so `interview-lens record` supervises
+Rebuilding the tap in-process never helps, so `transcriber record` supervises
 the helper and relaunches it, showing `restarting capture (1/3)`. Because a
 retiring helper holds its tap until teardown finishes, the replacement only
 starts once the old process has actually exited. A recovery therefore costs

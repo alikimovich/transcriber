@@ -1,5 +1,5 @@
 /**
- * Assembly of `ilcapture` transcript events into channel-labelled turns.
+ * Assembly of `tcapture` transcript events into channel-labelled turns.
  *
  * Pure and synchronous: no I/O, no timers, no globals. The only outside value it
  * reads is `Date.now()` in `window()`, and that is injectable.

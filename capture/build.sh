@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build + sign ilcapture.
+# Build + sign tcapture.
 #
 # The Info.plist is linked into the binary's __TEXT,__info_plist section rather
 # than living in an .app bundle — that is what lets a plain CLI executable carry
@@ -16,7 +16,7 @@ if [ -z "${CODESIGN_IDENTITY:-}" ]; then
 	: "${CODESIGN_IDENTITY:=-}"
 fi
 IDENTITY="$CODESIGN_IDENTITY"
-OUT="${1:-./ilcapture}"
+OUT="${1:-./tcapture}"
 
 swiftc -O -swift-version 5 \
 	-target arm64-apple-macos26.0 \

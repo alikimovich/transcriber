@@ -1,4 +1,4 @@
-# Interview Lens — working notes for agents
+# Transcriber — working notes for agents
 
 Read this before touching anything. Most of it is knowledge that cost real
 debugging time to acquire and is expensive to rediscover.
@@ -21,7 +21,7 @@ recording; that's it).
 ## Layout
 
 ```
-capture/     Swift CLI helper (`ilcapture`). Core Audio process tap + microphone
+capture/     Swift CLI helper (`tcapture`). Core Audio process tap + microphone
              + on-device SpeechAnalyzer, and an optional stereo AAC recorder.
              Emits JSONL on stdout, nothing else.
 cli/         bun + TypeScript. Transcript assembly, the Ink live view, the
@@ -29,8 +29,8 @@ cli/         bun + TypeScript. Transcript assembly, the Ink live view, the
 cli/src/store.ts
              The conversation archive: where a session's audio, transcript and
              metadata are written, plus the generated index.
-skill/       The `/interview` Claude Code skill. Symlinked to
-             ~/.claude/skills/interview by install.sh, so editing it here takes
+skill/       The `/transcriber` Claude Code skill. Symlinked to
+             ~/.claude/skills/transcriber by install.sh, so editing it here takes
              effect immediately.
 spike/       The original capture spike. Kept because it is the smallest
              reproduction of the tap setup; useful when Core Audio misbehaves.
@@ -89,7 +89,7 @@ bun run src/cli.tsx record --match zoom --title "weekly sync"
 The store is `cli/src/store.ts`. Sessions land in the user's Obsidian vault:
 
 ```
-~/memory/conversations/            (override with INTERVIEW_LENS_CONVERSATIONS)
+~/memory/conversations/            (override with TRANSCRIBER_CONVERSATIONS)
   AGENTS.md                        schema, written once; describes the layout
   index.md                        generated catalogue, newest first; rebuilt by
                                    scanning the tree, so it self-heals
@@ -133,12 +133,12 @@ audio **is the product**, so a session's audio and transcript are written to
 adds a network call, that is a product decision, not an implementation detail —
 surface it loudly.
 
-**stdout is a protocol channel.** In `ilcapture`, stdout is JSONL; use `note()`
+**stdout is a protocol channel.** In `tcapture`, stdout is JSONL; use `note()`
 (stderr) for anything human-facing. A stray `print` breaks the channel silently.
 
 **The capture path never prompts for permission.** A headless helper blocking
 on a modal dialog is indistinguishable from a hang — this cost three debugging
-rounds. `ilcapture request-mic` is the only place that may prompt.
+rounds. `tcapture request-mic` is the only place that may prompt.
 
 **Never `SIGKILL` the helper.** It leaks a process tap and a private aggregate
 audio device, both invisible, and truncates the audio file before its AAC

@@ -1,5 +1,5 @@
 /**
- * Public surface of the Interview Lens core.
+ * Public surface of the Transcriber core.
  *
  * A consumer assembles capture events into turns and saves them as a session:
  *

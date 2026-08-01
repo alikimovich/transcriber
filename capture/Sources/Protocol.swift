@@ -1,7 +1,7 @@
 // The wire protocol between the capture helper and the CLI.
 //
 // One JSON object per line on stdout. Everything human-facing goes to stderr so
-// stdout stays machine-readable and pipeable (`ilcapture | jq`).
+// stdout stays machine-readable and pipeable (`tcapture | jq`).
 
 import Foundation
 

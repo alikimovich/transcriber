@@ -98,7 +98,7 @@ final class SystemAudioTap {
         } else {
             description = CATapDescription(stereoMixdownOfProcesses: processObjectIDs)
         }
-        description.name = "Interview Lens"
+        description.name = "Transcriber"
         description.isPrivate = true
         description.muteBehavior = .unmuted  // never interfere with what the user hears
 
@@ -115,9 +115,9 @@ final class SystemAudioTap {
         }
 
         let aggregateDescription: [String: Any] = [
-            kAudioAggregateDeviceNameKey as String: "Interview Lens Capture",
+            kAudioAggregateDeviceNameKey as String: "Transcriber Capture",
             kAudioAggregateDeviceUIDKey as String:
-                "com.alikimovich.interview-lens.tap.\(UUID().uuidString)",
+                "com.alikimovich.transcriber.tap.\(UUID().uuidString)",
             kAudioAggregateDeviceMainSubDeviceKey as String: outputUID,
             kAudioAggregateDeviceClockDeviceKey as String: outputUID,
             kAudioAggregateDeviceIsPrivateKey as String: true,

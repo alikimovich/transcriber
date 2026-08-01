@@ -1,5 +1,5 @@
 #!/bin/bash
-# Interview Lens installer.
+# Transcriber installer.
 #
 # Checks prerequisites, asks for everything it needs in one block, then builds
 # and configures without further interruption. Safe to re-run: anything already
@@ -29,7 +29,7 @@ interactive=1
 [ -t 0 ] || interactive=0
 
 say ""
-say "${bold}Interview Lens${reset}"
+say "${bold}Transcriber${reset}"
 say "${dim}records and transcribes conversations, on-device${reset}"
 say ""
 
@@ -111,7 +111,7 @@ if [ "$interactive" -eq 1 ]; then
 		say ""
 	fi
 
-	printf '  Install the %sinterview-lens%s command into %s? [Y/n] ' "$bold" "$reset" "$default_bindir"
+	printf '  Install the %stranscriber%s command into %s? [Y/n] ' "$bold" "$reset" "$default_bindir"
 	read -r reply || true
 	case "${reply:-y}" in [Nn]*) CHOSEN_BINDIR="" ;; *) CHOSEN_BINDIR="$default_bindir" ;; esac
 
@@ -121,7 +121,7 @@ if [ "$interactive" -eq 1 ]; then
 	case "${reply:-y}" in [Nn]*) DO_MIC=0 ;; *) DO_MIC=1 ;; esac
 
 	say ""
-	printf '  Install the %s/interview%s skill for Claude Code? [Y/n] ' "$bold" "$reset"
+	printf '  Install the %s/transcriber%s skill for Claude Code? [Y/n] ' "$bold" "$reset"
 	read -r reply || true
 	case "${reply:-y}" in [Nn]*) DO_SKILL=0 ;; *) DO_SKILL=1 ;; esac
 	say ""
@@ -164,7 +164,7 @@ ok "dependencies installed"
 
 if [ -n "$CHOSEN_BINDIR" ]; then
 	mkdir -p "$CHOSEN_BINDIR"
-	launcher="$CHOSEN_BINDIR/interview-lens"
+	launcher="$CHOSEN_BINDIR/transcriber"
 	bun_path="$(command -v bun)"
 	cat >"$launcher" <<EOF
 #!/bin/bash
@@ -183,13 +183,13 @@ if [ "$DO_SKILL" -eq 1 ]; then
 	skill_dir="$HOME/.claude/skills"
 	mkdir -p "$skill_dir"
 	# Symlinked, not copied, so editing the repo updates the skill.
-	ln -sfn "$REPO/skill" "$skill_dir/interview"
-	ok "installed the /interview skill"
+	ln -sfn "$REPO/skill" "$skill_dir/transcriber"
+	ok "installed the /transcriber skill"
 fi
 
 if [ "$DO_MIC" -eq 1 ]; then
 	say "  requesting microphone access…"
-	./capture/ilcapture request-mic || warn "microphone not granted (you can re-run: ./capture/ilcapture request-mic)"
+	./capture/tcapture request-mic || warn "microphone not granted (you can re-run: ./capture/tcapture request-mic)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -205,9 +205,9 @@ say ""
 say ""
 say "${bold}Ready.${reset}"
 say ""
-say "  ${dim}See what is playing audio:${reset}  interview-lens doctor"
-say "  ${dim}Record a call:${reset}             interview-lens record --match zoom"
-say "  ${dim}Record everything:${reset}         interview-lens record --all"
+say "  ${dim}See what is playing audio:${reset}  transcriber doctor"
+say "  ${dim}Record a call:${reset}             transcriber record --match zoom"
+say "  ${dim}Record everything:${reset}         transcriber record --all"
 say ""
 say "  ${dim}Recordings land in ~/memory/conversations. Headphones give the cleanest"
 say "  channel separation; on the built-in speakers, echo cancellation keeps the"

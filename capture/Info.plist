@@ -2,10 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Deliberately still the interview-lens identifier: macOS keys the
+	     microphone and system-audio TCC grants to it (via the code signature).
+	     Renaming it to match the transcriber name would silently revoke both
+	     grants and force the user through the permission prompts again. -->
 	<key>CFBundleIdentifier</key>
 	<string>com.alikimovich.interview-lens.capture</string>
 	<key>CFBundleName</key>
-	<string>Interview Lens Capture</string>
+	<string>Transcriber Capture</string>
 	<key>CFBundleShortVersionString</key>
 	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
@@ -13,10 +17,10 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
 	<key>NSAudioCaptureUsageDescription</key>
-	<string>Interview Lens transcribes the other participants in your meeting so it can explain what a question is probing for.</string>
+	<string>Transcriber records and transcribes the other participants in the meetings and calls playing on this Mac.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Interview Lens transcribes your own speech so it can tell your answers apart from the interviewer's questions.</string>
+	<string>Transcriber records and transcribes your own speech so it can tell your side of the conversation apart from the others.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Interview Lens transcribes the conversation on this Mac. Audio never leaves your machine.</string>
+	<string>Transcriber transcribes the conversation on this Mac. Audio never leaves your machine.</string>
 </dict>
 </plist>

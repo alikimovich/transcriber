@@ -2,10 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Keeps the old identifier so the spike's existing TCC grants survive;
+	     see capture/Info.plist for the same reasoning. -->
 	<key>CFBundleIdentifier</key>
 	<string>com.alikimovich.interview-lens.probe</string>
 	<key>CFBundleName</key>
-	<string>Interview Lens Probe</string>
+	<string>Transcriber Probe</string>
 	<key>CFBundleShortVersionString</key>
 	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
@@ -13,8 +15,8 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
 	<key>NSAudioCaptureUsageDescription</key>
-	<string>Interview Lens captures system audio so it can transcribe the other participants in your meeting.</string>
+	<string>Transcriber (spike) captures system audio so it can transcribe the other participants in your meeting.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Interview Lens captures your microphone so it can tell your speech apart from the interviewer's.</string>
+	<string>Transcriber (spike) captures your microphone so it can tell your speech apart from everyone else's.</string>
 </dict>
 </plist>

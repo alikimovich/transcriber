@@ -121,7 +121,7 @@ final class AudioRecorder: @unchecked Sendable {
     private let themConverter: ChannelConverter
     private let meFIFO = SampleFIFO()
     private let themFIFO = SampleFIFO()
-    private let queue = DispatchQueue(label: "com.alikimovich.interview-lens.recorder")
+    private let queue = DispatchQueue(label: "com.alikimovich.transcriber.recorder")
 
     // The recording clock starts at the first sample fed on *either* channel,
     // not at init: tap setup blocks for several seconds, and anchoring here

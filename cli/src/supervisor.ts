@@ -73,7 +73,7 @@ export class CaptureSupervisor extends EventEmitter {
 
   constructor(private readonly options: SupervisorOptions) {
     super()
-    this.binaryPath = options.binaryPath ?? resolve(import.meta.dirname, '../../capture/ilcapture')
+    this.binaryPath = options.binaryPath ?? resolve(import.meta.dirname, '../../capture/tcapture')
     this.maxSilentRestarts = options.maxSilentRestarts ?? 3
   }
 

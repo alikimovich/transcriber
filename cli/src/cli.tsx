@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// interview-lens — entry point.
+// transcriber — entry point.
 //
 //   record   listen to mic + system audio, transcribe on-device, save a session
 //   doctor   check the capture helper, audio, and the conversation store
@@ -16,7 +16,7 @@ import { TranscriptStore } from './transcript.ts'
 import { Tui, type ViewState } from './tui.tsx'
 import type { CaptureEvent, Channel } from './types.ts'
 
-const CAPTURE_BINARY = resolve(import.meta.dirname, '../../capture/ilcapture')
+const CAPTURE_BINARY = resolve(import.meta.dirname, '../../capture/tcapture')
 
 function fail(message: string): never {
   process.stderr.write(`${message}\n`)
@@ -66,7 +66,7 @@ function parseTarget(argv: string[]): CaptureTarget {
       '  --match zoom      capture just the app whose name matches\n' +
       '  --pid 1234        capture just this process\n' +
       '  --all             capture all system output\n\n' +
-      '`interview-lens doctor` lists what is currently producing audio.'
+      '`transcriber doctor` lists what is currently producing audio.'
   )
 }
 
@@ -426,7 +426,7 @@ async function main(): Promise<void> {
       return runDoctor()
     default:
       process.stdout.write(
-        'interview-lens — record a conversation and save it as a transcript\n\n' +
+        'transcriber — record a conversation and save it as a transcript\n\n' +
           '  record    listen and save a session (--match zoom | --pid N | --all)\n' +
           '              --no-mic        system audio only, skip the microphone\n' +
           '              --title "text"  name the session (used in the folder + transcript)\n' +

@@ -1,5 +1,5 @@
 {
-  "name": "interview-lens",
+  "name": "transcriber",
   "version": "0.1.0",
   "description": "On-device conversation logger: capture, transcribe, and archive meetings",
   "type": "module",
@@ -28,6 +28,6 @@
     "typescript": "^5.9.3"
   },
   "bin": {
-    "interview-lens": "./src/cli.tsx"
+    "transcriber": "./src/cli.tsx"
   }
 }

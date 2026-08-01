@@ -42,7 +42,7 @@ final class MicCapture {
         case denied
         /// Never asked. The capture path deliberately does not prompt — a
         /// headless helper that blocks on a modal dialog is indistinguishable
-        /// from a hang. `ilcapture request-mic` does the asking.
+        /// from a hang. `tcapture request-mic` does the asking.
         case notDetermined
     }
 

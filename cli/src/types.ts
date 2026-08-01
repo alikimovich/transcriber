@@ -1,5 +1,5 @@
 /**
- * Wire types for the `ilcapture` helper. Mirrors `capture/Sources/Protocol.swift`
+ * Wire types for the `tcapture` helper. Mirrors `capture/Sources/Protocol.swift`
  * — keep the two in sync.
  *
  * The helper writes one JSON object per line on stdout. Every event carries `t`,

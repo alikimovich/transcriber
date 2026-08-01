@@ -2,6 +2,6 @@ spike/ilprobe
 spike/*.log
 spike/sample.txt
 *.aiff
-capture/ilcapture
+capture/tcapture
 node_modules/
 cli/node_modules/
