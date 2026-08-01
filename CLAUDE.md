@@ -48,10 +48,13 @@ Speaker identity comes from the audio *source*, not diarization:
 - **`me`** — the microphone (you).
 - **`them`** — system audio (the meeting, the call, whoever else is talking).
 
-This is far more reliable than asking a model to tell voices apart, but it
-assumes **headphones**. Without them, `them`'s voice leaks from the speakers
-into the mic and lands on both channels. These two strings are the wire
-contract; the recorder also maps **me → left, them → right** in the stereo file.
+This is far more reliable than asking a model to tell voices apart. Headphones
+give perfect separation. On the built-in speakers, `MicCapture` enables macOS
+voice processing (echo cancellation) so `them`'s voice is subtracted from the
+mic — decided once at session start from the default output's transport type,
+with ducking pinned to minimum so the tapped call audio isn't attenuated.
+These two strings (`me`/`them`) are the wire contract; the recorder also maps
+**me → left, them → right** in the stereo file.
 
 ## Commands
 

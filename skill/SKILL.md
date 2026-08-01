@@ -38,9 +38,10 @@ If the command is missing, Lens is not installed — point the user at
 
 ## Start a recording
 
-Ask what to capture if it isn't obvious, then run it. **Tell the user to wear
-headphones** — without them, the other side's voice leaks into the mic and lands
-on both channels.
+Ask what to capture if it isn't obvious, then run it. Headphones give the
+cleanest channel separation; on the built-in speakers, echo cancellation kicks
+in automatically to keep the other side's voice off the mic channel (the
+session's `log.txt` says `echo cancellation: on`).
 
 ```sh
 interview-lens record --match zoom --title "weekly sync"   # just one app

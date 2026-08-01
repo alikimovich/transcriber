@@ -35,9 +35,10 @@ Two decisions worth knowing about:
 
 **Speaker identity comes from the audio source, not diarization.** Whatever
 arrives on the system tap is *them*; whatever arrives on the mic is *you*. This
-is much more reliable than asking a model to tell voices apart — but it assumes
-headphones. Without them the other side's voice leaks from your speakers into
-the microphone and lands on both channels.
+is much more reliable than asking a model to tell voices apart. Headphones give
+the cleanest separation; when sound plays through the built-in speakers instead,
+the helper enables macOS echo cancellation on the microphone, which subtracts
+the speaker output from the mic signal.
 
 **The tap can be scoped to a single process.** `--match zoom` captures Zoom and
 nothing else, so Spotify and notification chimes never enter the recording. This
@@ -130,8 +131,9 @@ Point the archive somewhere other than the vault with `INTERVIEW_LENS_CONVERSATI
    zero. This is what proves per-process isolation.
 4. `request-mic`, grant, then capture: speaking produces `me` lines.
 5. Wearing headphones, confirm your voice appears only on `me` and the remote
-   voice only on `them`. Without headphones, expect bleed — that's the known
-   limitation, not a bug.
+   voice only on `them`. On the built-in speakers, check the session's
+   `log.txt` for `echo cancellation: on` and confirm the remote voice stays
+   off the `me` channel.
 6. `interview-lens record --match <browser>`, let it run a bit, stop with **q**;
    confirm a session folder was written and `transcript.md` reads correctly.
 7. Play the saved `audio.m4a` (`afplay …/audio.m4a`) — it should be a valid
@@ -154,6 +156,9 @@ retiring helper holds its tap until teardown finishes, the replacement only
 starts once the old process has actually exited. A recovery therefore costs
 another startup cycle. Root cause unidentified; see SPIKE.md.
 
-**Without headphones the channels bleed.** The other side's voice comes out of
-your speakers and back in through the microphone, so the same speech lands on
-both channels. Wear headphones.
+**Speaker playback relies on echo cancellation.** With the built-in speakers as
+output, the helper turns on macOS voice processing so the other side's voice is
+subtracted from the microphone — at the cost of some noise suppression and
+auto-gain coloring the `me` channel. Headphones avoid all of that and remain
+the cleanest setup. Switching outputs mid-session doesn't re-evaluate the
+choice; it's decided when the recording starts.
