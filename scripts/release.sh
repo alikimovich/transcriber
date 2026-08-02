@@ -86,8 +86,13 @@ cp cli/dist/transcriber capture/tcapture LICENSE README.md "$STAGE/"
 ditto -c -k --keepParent "$STAGE" "$ZIP"
 
 say "${bold}Notarizing${reset} (takes a few minutes)"
-xcrun notarytool submit "$ZIP" --keychain-profile "$PROFILE" --wait |
-	tee /dev/stderr | grep -q "status: Accepted" ||
+# Capture then grep — `grep -q` in a pipe exits at first match, and under
+# pipefail the resulting SIGPIPE to notarytool/tee read as failure even on
+# an Accepted submission.
+notary_out=$(xcrun notarytool submit "$ZIP" --keychain-profile "$PROFILE" --wait) ||
+	die "notarytool submit failed" "$notary_out"
+say "$notary_out"
+grep -q "status: Accepted" <<<"$notary_out" ||
 	die "notarization was not accepted" \
 		"xcrun notarytool log <submission-id> --keychain-profile $PROFILE"
 
