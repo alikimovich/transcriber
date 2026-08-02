@@ -15,6 +15,7 @@ import { CaptureSupervisor, type CaptureTarget, captureBinaryPath } from './supe
 import { TranscriptStore } from './transcript.ts'
 import { Tui, type ViewState } from './tui.tsx'
 import type { CaptureEvent, Channel } from './types.ts'
+import { runUpdate, VERSION } from './update.ts'
 
 const CAPTURE_BINARY = captureBinaryPath()
 
@@ -424,13 +425,21 @@ async function main(): Promise<void> {
       return runRecord(argv)
     case 'doctor':
       return runDoctor()
+    case 'update':
+      return runUpdate()
+    case 'version':
+    case '--version':
+      process.stdout.write(`transcriber v${VERSION}\n`)
+      return
     default:
       process.stdout.write(
         'transcriber — record a conversation and save it as a transcript\n\n' +
           '  record    listen and save a session (--match zoom | --pid N | --all)\n' +
           '              --no-mic        system audio only, skip the microphone\n' +
           '              --title "text"  name the session (used in the folder + transcript)\n' +
-          '  doctor    check the capture helper, audio, and the conversation store\n\n' +
+          '  doctor    check the capture helper, audio, and the conversation store\n' +
+          '  update    check GitHub for a newer release and install it\n' +
+          '              (the only command that ever touches the network)\n\n' +
           `Sessions are saved under ${conversationsRoot()}\n`
       )
       process.exit(command ? 64 : 0)

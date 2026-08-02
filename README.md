@@ -50,6 +50,14 @@ which can only capture all system output.
 Requirements either way: **Apple Silicon and macOS 26+** (on-device
 transcription uses SpeechAnalyzer).
 
+### Homebrew
+
+```sh
+brew install alikimovich/tap/transcriber
+```
+
+Updates arrive with `brew upgrade` like everything else.
+
 ### From a release
 
 Grab the latest zip from
@@ -65,7 +73,8 @@ transcriber doctor
 The two binaries must stay side by side — `transcriber` looks for its capture
 helper next to its own executable. Both are signed and notarized; no build
 tools, bun, or Xcode needed. Recordings default to `~/Documents/Conversations`
-(set `TRANSCRIBER_CONVERSATIONS` to change that).
+(set `TRANSCRIBER_CONVERSATIONS` to change that). Later, `transcriber update`
+fetches and installs the newest release in place.
 
 ### From source
 
@@ -137,7 +146,10 @@ installer also asks and bakes the answer into the launcher).
 ## Privacy
 
 - **Nothing leaves the machine.** Transcription is fully on-device via Apple's
-  `SpeechAnalyzer`; there are no network calls of any kind.
+  `SpeechAnalyzer`. The single exception to "no network calls" is the explicit
+  `transcriber update` command, which contacts GitHub Releases only when you
+  run it; recording, transcription, and every other command never touch the
+  network.
 - Audio and transcripts are written locally, to `~/Documents/Conversations` (or
   wherever `TRANSCRIBER_CONVERSATIONS` points). Deleting a session folder
   deletes the recording — there is no copy anywhere else.

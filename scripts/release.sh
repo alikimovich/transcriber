@@ -107,5 +107,25 @@ gh release create "$TAG" "$ZIP" \
 	--title "Transcriber $VERSION" \
 	--generate-notes
 
+# ---------------------------------------------------------------------------
+# Point the Homebrew tap at the new release
+# ---------------------------------------------------------------------------
+
+say "${bold}Updating the Homebrew tap${reset}"
+sha=$(shasum -a 256 "$ZIP" | awk '{print $1}')
+tapdir=$(mktemp -d)
+git clone -q --depth 1 git@github.com:alikimovich/homebrew-tap.git "$tapdir"
+sed -i '' \
+	-e "s|^  url \".*\"|  url \"https://github.com/alikimovich/transcriber/releases/download/$TAG/transcriber-$TAG-macos-arm64.zip\"|" \
+	-e "s|^  sha256 \".*\"|  sha256 \"$sha\"|" \
+	-e "s|^  version \".*\"|  version \"$VERSION\"|" \
+	"$tapdir/Formula/transcriber.rb"
+git -C "$tapdir" \
+	-c user.name="Andrei Alikimovich" \
+	-c user.email="35639081+alikimovich@users.noreply.github.com" \
+	commit -qam "transcriber $VERSION"
+git -C "$tapdir" push -q
+rm -rf "$tapdir"
+
 say ""
 say "${bold}Released $TAG.${reset}"

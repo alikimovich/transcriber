@@ -92,6 +92,12 @@ CLI needs the JIT entitlements in `scripts/cli-entitlements.plist` or the
 hardened-runtime signature kills it on launch. `cli/stub/react-devtools-core`
 exists so the compile can bundle ink; see its package.json.
 
+After publishing, the script also rewrites url/sha256/version in
+`alikimovich/homebrew-tap` (Formula/transcriber.rb), so
+`brew install alikimovich/tap/transcriber` always serves the latest release.
+Installed copies can also self-update with `transcriber update`
+(cli/src/update.ts) — the product's single, user-invoked network call.
+
 ## Conventions
 
 - **bun**, not npm or node. Matches every recent repo in `~/dev`.
@@ -148,10 +154,13 @@ CLI feature: the product stays SpeechAnalyzer-only and dependency-free.
 **Privacy is now "local, not nowhere".** This is the one invariant that
 *changed* with the pivot. Previously audio never touched disk; now recording
 audio **is the product**, so a session's audio and transcript are written to
-the local conversation archive. What holds firm: transcription is fully on-device and
-**there are no network calls at all** — nothing is sent anywhere. If a change
-adds a network call, that is a product decision, not an implementation detail —
-surface it loudly.
+the local conversation archive. What holds firm: transcription is fully
+on-device and **the only network call in the product is the user-invoked
+`transcriber update`** (cli/src/update.ts — it checks GitHub Releases and
+swaps the binaries, nothing more). Recording, transcription, doctor, and
+everything else never touch the network, and nothing is ever *sent* anywhere.
+If a change adds any other network call, that is a product decision, not an
+implementation detail — surface it loudly.
 
 **stdout is a protocol channel.** In `tcapture`, stdout is JSONL; use `note()`
 (stderr) for anything human-facing. A stray `print` breaks the channel silently.
