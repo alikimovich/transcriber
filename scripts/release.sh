@@ -66,6 +66,10 @@ command -v gh >/dev/null 2>&1 || die "gh CLI not found"
 
 say "${bold}Building${reset}"
 CODESIGN_IDENTITY="$IDENTITY" ./capture/build.sh
+# Re-sign without get-task-allow: the dev entitlements keep it so lldb can
+# attach, but notarization rejects any binary that requests it.
+codesign --force --options runtime --entitlements capture/entitlements-release.plist \
+	--sign "$IDENTITY" capture/tcapture
 
 (cd cli && bun install --silent && bun run check && bun run build:bin)
 codesign --force --options runtime --entitlements scripts/cli-entitlements.plist \
