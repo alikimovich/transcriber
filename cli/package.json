@@ -1,6 +1,6 @@
 {
   "name": "transcriber",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "On-device conversation logger: capture, transcribe, and archive meetings",
   "type": "module",
   "private": true,
