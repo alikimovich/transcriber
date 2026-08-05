@@ -29,6 +29,13 @@ VERSION="${1:?usage: scripts/release.sh <version>   (e.g. 0.1.0)}"
 PROFILE="${NOTARY_PROFILE:-transcriber-notary}"
 TAG="v$VERSION"
 
+# notarytool defaults to the data-protection keychain, which headless shells
+# can write to but not read back from — credentials look stored, then vanish.
+# Point NOTARY_KEYCHAIN at a file keychain (usually login.keychain-db) and
+# store the profile with the same --keychain flag; see the script header.
+NOTARY_ARGS=(--keychain-profile "$PROFILE")
+[ -n "${NOTARY_KEYCHAIN:-}" ] && NOTARY_ARGS+=(--keychain "$NOTARY_KEYCHAIN")
+
 # ---------------------------------------------------------------------------
 # Preflight — fail before building anything
 # ---------------------------------------------------------------------------
@@ -54,7 +61,7 @@ IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null |
 	sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)
 [ -n "$IDENTITY" ] || die "no Developer ID Application certificate found"
 
-xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1 ||
+xcrun notarytool history "${NOTARY_ARGS[@]}" >/dev/null 2>&1 ||
 	die "notarization credentials not found (keychain profile \"$PROFILE\")" \
 		"Run the store-credentials command in this script's header once."
 
@@ -97,7 +104,7 @@ say "${bold}Notarizing${reset} (takes a few minutes)"
 # Capture then grep — `grep -q` in a pipe exits at first match, and under
 # pipefail the resulting SIGPIPE to notarytool/tee read as failure even on
 # an Accepted submission.
-notary_out=$(xcrun notarytool submit "$ZIP" --keychain-profile "$PROFILE" --wait) ||
+notary_out=$(xcrun notarytool submit "$ZIP" "${NOTARY_ARGS[@]}" --wait) ||
 	die "notarytool submit failed" "$notary_out"
 say "$notary_out"
 grep -q "status: Accepted" <<<"$notary_out" ||
