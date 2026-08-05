@@ -12,22 +12,34 @@ import { dirname, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import type { CaptureEvent } from './types.ts'
 
+/** Path of the helper binary inside its app bundle, from the bundle's parent. */
+const IN_BUNDLE = join('TranscriberCapture.app', 'Contents', 'MacOS', 'tcapture')
+
 /**
- * Where the `tcapture` helper lives. Three homes, tried in order:
+ * Where the `tcapture` helper lives. Tried in order:
  *  1. `TRANSCRIBER_CAPTURE` — explicit override.
- *  2. Next to the running executable — how a compiled release ships, the two
- *     binaries side by side.
- *  3. `capture/tcapture` in the repo — a source checkout. In a compiled
- *     binary `import.meta.dirname` points into the bundled virtual
- *     filesystem, so this candidate simply never exists there.
+ *  2. `TranscriberCapture.app` next to the running executable — how a
+ *     release ships. The bundle (not a bare binary) is what gives the helper
+ *     its own TCC identity, so the system-audio permission prompt actually
+ *     appears; see capture/build.sh.
+ *  3. A bare `tcapture` next to the executable — pre-0.1.2 installs.
+ *  4. The repo's `capture/` build — a source checkout. In a compiled binary
+ *     `import.meta.dirname` points into the bundled virtual filesystem, so
+ *     these candidates simply never exist there.
  * When none exist, the repo path is returned anyway so error messages point
  * somewhere actionable ("run capture/build.sh").
  */
 export function captureBinaryPath(): string {
   const override = process.env.TRANSCRIBER_CAPTURE
   if (override !== undefined && override !== '') return override
-  const repoBuild = resolve(import.meta.dirname, '../../capture/tcapture')
-  const candidates = [join(dirname(process.execPath), 'tcapture'), repoBuild]
+  const execDir = dirname(process.execPath)
+  const repoBuild = resolve(import.meta.dirname, '../../capture', IN_BUNDLE)
+  const candidates = [
+    join(execDir, IN_BUNDLE),
+    join(execDir, 'tcapture'),
+    repoBuild,
+    resolve(import.meta.dirname, '../../capture/tcapture')
+  ]
   return candidates.find((p) => existsSync(p)) ?? repoBuild
 }
 

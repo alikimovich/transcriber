@@ -65,13 +65,17 @@ Grab the latest zip from
 
 ```sh
 unzip transcriber-v*-macos-arm64.zip
-mv transcriber-v*-macos-arm64/{transcriber,tcapture} ~/.local/bin/
-tcapture request-mic        # grant microphone access once, up front
+mv transcriber-v*-macos-arm64/transcriber ~/.local/bin/
+mv transcriber-v*-macos-arm64/TranscriberCapture.app ~/.local/bin/
+transcriber request-mic     # grant microphone access once, up front
 transcriber doctor
 ```
 
-The two binaries must stay side by side — `transcriber` looks for its capture
-helper next to its own executable. Both are signed and notarized; no build
+The CLI and `TranscriberCapture.app` (the capture helper) must stay side by
+side — `transcriber` looks for the helper next to its own executable. The
+helper lives in an app bundle so macOS reliably shows the permission prompts
+under its own name, "Transcriber Capture", instead of attributing them to
+whatever terminal launched it. Everything is signed and notarized; no build
 tools, bun, or Xcode needed. Recordings default to `~/Documents/Conversations`
 (set `TRANSCRIBER_CONVERSATIONS` to change that). Later, `transcriber update`
 fetches and installs the newest release in place.
@@ -113,11 +117,13 @@ cd cli && bun install
 | Permission | When it's asked | Where to fix it |
 |---|---|---|
 | System audio recording | first capture | Privacy & Security → Screen & System Audio Recording |
-| Microphone | `tcapture request-mic` | Privacy & Security → Microphone |
+| Microphone | `transcriber request-mic` | Privacy & Security → Microphone |
+
+Both prompts name **Transcriber Capture** — the helper's app-bundle identity.
 
 The capture path deliberately never shows a permission dialog — a headless
 helper blocking on a modal prompt is indistinguishable from a hang. Run
-`./capture/tcapture request-mic` once, up front.
+`transcriber request-mic` once, up front.
 
 A missing microphone degrades the session to *them*-only rather than failing
 it, so a call still gets recorded even if you never granted the mic.

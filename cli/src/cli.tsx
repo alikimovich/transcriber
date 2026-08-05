@@ -426,7 +426,14 @@ async function main(): Promise<void> {
     case 'doctor':
       return runDoctor()
     case 'update':
-      return runUpdate()
+      return runUpdate({ force: argv.includes('--force') })
+    case 'request-mic': {
+      // Passthrough to the helper, which owns the only permission dialog in
+      // the product. Saves anyone from typing a path into the app bundle.
+      const result = spawnSync(CAPTURE_BINARY, ['request-mic'], { stdio: 'inherit' })
+      process.exit(result.status ?? 1)
+      break
+    }
     case 'version':
     case '--version':
       process.stdout.write(`transcriber v${VERSION}\n`)
@@ -434,12 +441,14 @@ async function main(): Promise<void> {
     default:
       process.stdout.write(
         'transcriber — record a conversation and save it as a transcript\n\n' +
-          '  record    listen and save a session (--match zoom | --pid N | --all)\n' +
-          '              --no-mic        system audio only, skip the microphone\n' +
-          '              --title "text"  name the session (used in the folder + transcript)\n' +
-          '  doctor    check the capture helper, audio, and the conversation store\n' +
-          '  update    check GitHub for a newer release and install it\n' +
-          '              (the only command that ever touches the network)\n\n' +
+          '  record       listen and save a session (--match zoom | --pid N | --all)\n' +
+          '                 --no-mic        system audio only, skip the microphone\n' +
+          '                 --title "text"  name the session (used in the folder + transcript)\n' +
+          '  doctor       check the capture helper, audio, and the conversation store\n' +
+          '  request-mic  ask for microphone access once, up front\n' +
+          '  update       check GitHub for a newer release and install it\n' +
+          '                 --force  reinstall even when already up to date\n' +
+          '                 (the only command that ever touches the network)\n\n' +
           `Sessions are saved under ${conversationsRoot()}\n`
       )
       process.exit(command ? 64 : 0)

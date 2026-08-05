@@ -69,7 +69,7 @@ CODESIGN_IDENTITY="$IDENTITY" ./capture/build.sh
 # Re-sign without get-task-allow: the dev entitlements keep it so lldb can
 # attach, but notarization rejects any binary that requests it.
 codesign --force --options runtime --entitlements capture/entitlements-release.plist \
-	--sign "$IDENTITY" capture/tcapture
+	--sign "$IDENTITY" capture/TranscriberCapture.app
 
 (cd cli && bun install --silent && bun run check && bun run build:bin)
 codesign --force --options runtime --entitlements scripts/cli-entitlements.plist \
@@ -82,7 +82,15 @@ codesign --force --options runtime --entitlements scripts/cli-entitlements.plist
 STAGE="dist/transcriber-$TAG-macos-arm64"
 ZIP="$STAGE.zip"
 rm -rf dist && mkdir -p "$STAGE"
-cp cli/dist/transcriber capture/tcapture LICENSE README.md "$STAGE/"
+cp cli/dist/transcriber LICENSE README.md "$STAGE/"
+ditto capture/TranscriberCapture.app "$STAGE/TranscriberCapture.app"
+# A bare helper copy too: pre-0.1.2 installs self-update by extracting
+# `tcapture` from this zip, and the binary is self-describing (embedded
+# Info.plist) so that path keeps working. Re-signed standalone — the copy's
+# bundle-sealed signature does not verify outside its bundle.
+cp capture/TranscriberCapture.app/Contents/MacOS/tcapture "$STAGE/tcapture"
+codesign --force --options runtime --entitlements capture/entitlements-release.plist \
+	--sign "$IDENTITY" "$STAGE/tcapture"
 ditto -c -k --keepParent "$STAGE" "$ZIP"
 
 say "${bold}Notarizing${reset} (takes a few minutes)"

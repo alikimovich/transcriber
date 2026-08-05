@@ -21,9 +21,13 @@ recording; that's it).
 ## Layout
 
 ```
-capture/     Swift CLI helper (`tcapture`). Core Audio process tap + microphone
-             + on-device SpeechAnalyzer, and an optional stereo AAC recorder.
-             Emits JSONL on stdout, nothing else.
+capture/     Swift capture helper (`tcapture`), built into a minimal headless
+             app bundle (TranscriberCapture.app) so TCC attributes permission
+             grants to it rather than to the launching terminal — see
+             capture/build.sh. `capture/tcapture` is a convenience symlink
+             into the bundle. Core Audio process tap + microphone + on-device
+             SpeechAnalyzer, and an optional stereo AAC recorder. Emits JSONL
+             on stdout, nothing else.
 cli/         bun + TypeScript. Transcript assembly, the Ink live view, the
              session store, and the supervisor that owns the helper's lifecycle.
 cli/src/store.ts
@@ -75,10 +79,11 @@ bun run src/cli.tsx record --match zoom --title "weekly sync"
 
 ## Releasing
 
-Distribution is a GitHub release of two notarized standalone binaries —
-`transcriber` (the CLI, compiled with `bun build --compile`) and `tcapture` —
-which must sit side by side (`captureBinaryPath()` in `cli/src/supervisor.ts`
-looks next to the executable).
+Distribution is a GitHub release of the notarized `transcriber` CLI
+(compiled with `bun build --compile`) plus `TranscriberCapture.app`, side by
+side (`captureBinaryPath()` in `cli/src/supervisor.ts` looks next to the
+executable, bundle first). The zip also carries a bare `tcapture` copy,
+re-signed standalone, solely so pre-0.1.2 self-updaters don't break.
 
 ```sh
 # bump the version in cli/package.json AND capture/Info.plist, commit, then:

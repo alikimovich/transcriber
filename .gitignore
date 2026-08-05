@@ -7,3 +7,4 @@ node_modules/
 cli/node_modules/
 cli/dist/
 /dist/
+capture/TranscriberCapture.app/

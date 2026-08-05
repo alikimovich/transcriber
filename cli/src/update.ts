@@ -13,7 +13,15 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { chmodSync, copyFileSync, mkdtempSync, realpathSync, renameSync, rmSync } from 'node:fs'
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  realpathSync,
+  renameSync,
+  rmSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import pkg from '../package.json'
@@ -70,7 +78,9 @@ function verifySignature(path: string, name: string): void {
   }
 }
 
-export async function runUpdate(): Promise<void> {
+const BUNDLE = 'TranscriberCapture.app'
+
+export async function runUpdate({ force = false }: { force?: boolean } = {}): Promise<void> {
   const out = (s: string) => process.stdout.write(`${s}\n`)
 
   // Only a compiled release install can self-update: bun standalone binaries
@@ -95,8 +105,9 @@ export async function runUpdate(): Promise<void> {
     assets: Array<{ name: string; browser_download_url: string }>
   }
 
-  if (!isNewer(release.tag_name, VERSION)) {
+  if (!isNewer(release.tag_name, VERSION) && !force) {
     out(`already up to date (latest release is ${release.tag_name})`)
+    out('run with --force to reinstall it anyway')
     return
   }
 
@@ -116,22 +127,41 @@ export async function runUpdate(): Promise<void> {
     const unzip = spawnSync('ditto', ['-x', '-k', zipPath, work], { encoding: 'utf8' })
     if (unzip.status !== 0) fail(`could not extract the release zip: ${unzip.stderr}`)
 
-    // The zip contains a single versioned folder with both binaries.
+    // The zip contains a single versioned folder: the CLI, the helper's app
+    // bundle, and a bare helper copy kept for pre-bundle installers.
     const extracted = join(work, `transcriber-${release.tag_name}-macos-arm64`)
     const targetDir = dirname(execPath)
-    for (const name of ['transcriber', 'tcapture'] as const) {
-      verifySignature(join(extracted, name), name)
-    }
-    for (const name of ['transcriber', 'tcapture'] as const) {
-      // Copy into the target directory first so the final rename is atomic
-      // and never crosses filesystems; renaming over the running executable
-      // is fine — the old inode lives on until this process exits.
-      const staged = join(targetDir, `.${name}.update`)
-      copyFileSync(join(extracted, name), staged)
-      chmodSync(staged, 0o755)
-      renameSync(staged, join(targetDir, name))
-    }
+
+    // Verify everything before touching anything.
+    verifySignature(join(extracted, 'transcriber'), 'transcriber')
+    verifySignature(join(extracted, BUNDLE), BUNDLE)
+
+    // The CLI: copy into the target directory so the final rename is atomic
+    // and never crosses filesystems; renaming over the running executable is
+    // fine — the old inode lives on until this process exits.
+    const stagedCli = join(targetDir, '.transcriber.update')
+    copyFileSync(join(extracted, 'transcriber'), stagedCli)
+    chmodSync(stagedCli, 0o755)
+    renameSync(stagedCli, join(targetDir, 'transcriber'))
+
+    // The helper: ditto preserves the bundle's signature and structure; a
+    // stage-then-rename keeps the visible path valid at every moment.
+    const stagedApp = join(targetDir, `.${BUNDLE}.update`)
+    rmSync(stagedApp, { recursive: true, force: true })
+    const copy = spawnSync('ditto', [join(extracted, BUNDLE), stagedApp], { encoding: 'utf8' })
+    if (copy.status !== 0) fail(`could not install the capture helper: ${copy.stderr}`)
+    rmSync(join(targetDir, BUNDLE), { recursive: true, force: true })
+    renameSync(stagedApp, join(targetDir, BUNDLE))
+
+    // Retire a pre-bundle flat helper so discovery can't find the stale one.
+    // (Skip symlinks — a source checkout's convenience link points into the
+    // bundle we just installed.)
+    const flat = join(targetDir, 'tcapture')
+    if (existsSync(flat) && realpathSync(flat) === flat) rmSync(flat)
+
     out(`updated v${VERSION} → ${release.tag_name}`)
+    out('note: if macOS asks again for microphone or system-audio access, that is')
+    out('the helper’s new app-bundle identity registering — grant once and done')
   } finally {
     rmSync(work, { recursive: true, force: true })
   }
